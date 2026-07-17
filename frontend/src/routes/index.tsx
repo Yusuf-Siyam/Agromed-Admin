@@ -19,14 +19,14 @@ import { NotificationsRoutes } from '../features/notifications/routes';
 import { ReviewsRoutes } from '../features/reviews/routes';
 import { SettingsRoutes } from '../features/settings/routes';
 import { ProfileRoutes } from '../features/profile/routes';
+import { AuthRoutes } from '../features/auth/routes';
 
 export const router = createBrowserRouter([
   {
     path: '/auth',
     element: <AuthLayout />,
     children: [
-      { path: 'login', element: <div>Login Page Placeholder</div> },
-      { path: 'register', element: <div>Register Page Placeholder</div> },
+      ...AuthRoutes,
       { path: '', element: <Navigate to="login" replace /> }
     ]
   },
