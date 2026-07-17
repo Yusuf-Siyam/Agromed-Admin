@@ -1,7 +1,8 @@
+import ReviewsList from './components/ReviewsList';
 
 export const ReviewsRoutes = [
   {
     path: '/reviews',
-    element: <div>Reviews Module Placeholder</div>
+    element: <ReviewsList />
   }
 ];
