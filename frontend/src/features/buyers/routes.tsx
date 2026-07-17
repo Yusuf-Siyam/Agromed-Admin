@@ -1,7 +1,13 @@
+import BuyerList from './components/BuyerList';
+import BuyerDetails from './components/BuyerDetails';
 
 export const BuyersRoutes = [
   {
     path: '/buyers',
-    element: <div>Buyers Module Placeholder</div>
+    element: <BuyerList />
+  },
+  {
+    path: '/buyers/:id',
+    element: <BuyerDetails />
   }
 ];
