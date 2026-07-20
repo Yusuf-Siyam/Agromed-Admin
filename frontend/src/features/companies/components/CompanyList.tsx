@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Check, X as CloseIcon, Trash2, Ban } from 'lucide-react';
+import { Eye, Check, X as CloseIcon, Trash2, Ban, Plus } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
@@ -9,6 +9,7 @@ import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useToast } from '@/components/shared/Toast';
 import { mockCompanies } from '@/mock-data/companies';
 import type { CompanyItem } from '@/mock-data/companies';
+import CompanyModal from './CompanyModal';
 
 export default function CompanyList() {
   const navigate = useNavigate();
@@ -16,6 +17,9 @@ export default function CompanyList() {
 
   // Local state for companies to simulate operations (verify, suspend, delete, etc.)
   const [companies, setCompanies] = useState<CompanyItem[]>(mockCompanies);
+
+  // Modal state for adding new company
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Search & Filter state
   const [search, setSearch] = useState('');
@@ -30,6 +34,12 @@ export default function CompanyList() {
     type: 'verify' | 'reject' | 'suspend' | 'activate' | 'delete';
     company: CompanyItem;
   } | null>(null);
+
+  const handleSaveCompany = (newCompany: CompanyItem) => {
+    setCompanies((prev) => [newCompany, ...prev]);
+    success(`Company "${newCompany.name}" registered successfully!`);
+    setIsModalOpen(false);
+  };
 
   // Table columns definition
   const columns: Column<CompanyItem>[] = [
@@ -247,9 +257,10 @@ export default function CompanyList() {
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Companies' }]}
         action={
           <button
-            onClick={() => success('Add Company modal coming soon')}
+            onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
           >
+            <Plus className="h-4 w-4" />
             Add New Company
           </button>
         }
@@ -280,6 +291,14 @@ export default function CompanyList() {
             </select>
           </div>
         }
+      />
+
+      {/* Add Company Modal */}
+      <CompanyModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveCompany}
+        existingCount={companies.length}
       />
 
       {/* Action Dialog Confirmation */}
