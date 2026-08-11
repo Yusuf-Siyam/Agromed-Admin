@@ -15,7 +15,7 @@ export default function NotificationCenter() {
   const [alerts, setAlerts] = useState<SystemAlert[]>(mockSystemAlerts);
 
   // Form states
-  const [targetAudience, setTargetAudience] = useState<'all' | 'farmers' | 'buyers' | 'companies'>('all');
+  const [targetAudience, setTargetAudience] = useState<'all' | 'farmers' | 'companies' | 'service_providers'>('all');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,7 +32,7 @@ export default function NotificationCenter() {
       label: 'Audience Target',
       render: (row) => (
         <span className="text-[10px] px-2 py-0.5 border border-border bg-muted text-foreground/80 font-bold uppercase rounded-md">
-          {row.targetAudience}
+          {row.targetAudience.replace('_', ' ')}
         </span>
       )
     },
@@ -76,7 +76,7 @@ export default function NotificationCenter() {
       // Reset form
       setTitle('');
       setMessage('');
-    }, 1200);
+    }, 1000);
   };
 
   const getAlertIcon = (severity: 'info' | 'warning' | 'danger') => {
@@ -122,10 +122,10 @@ export default function NotificationCenter() {
                   disabled={isLoading}
                   className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="all">All Platform Users</option>
+                  <option value="all">All Stakeholders</option>
                   <option value="farmers">Farmers Only</option>
-                  <option value="buyers">Corporate Buyers Only</option>
                   <option value="companies">Agro Company Partners</option>
+                  <option value="service_providers">Service Providers</option>
                 </select>
               </div>
 
@@ -212,7 +212,7 @@ export default function NotificationCenter() {
 
                     <button
                       onClick={() => handleDismissAlert(alert.id)}
-                      className="px-2 py-1 border border-border hover:bg-muted text-foreground text-[10px] font-bold rounded transition-colors cursor-pointer"
+                      className="px-2 py-1 border border-border hover:bg-muted text-foreground text-[10px] font-bold rounded transition-colors cursor-pointer shrink-0"
                     >
                       Dismiss
                     </button>
