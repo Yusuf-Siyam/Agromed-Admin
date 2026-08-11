@@ -58,7 +58,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'All Companies', path: '/companies', icon: Building2 },
       { label: 'Verification', path: '/companies/verification', icon: ShieldCheck },
-      { label: 'Performance', path: '/companies/performance', icon: Award }
+      { label: 'Company Performance', path: '/companies/performance', icon: Award }
     ]
   },
   {
@@ -74,8 +74,8 @@ const navSections: NavSection[] = [
       { label: 'Sales', path: '/sales', icon: TrendingUp },
       { label: 'Revenue', path: '/revenue', icon: DollarSign },
       { label: 'Commission', path: '/commission', icon: Percent },
-      { label: 'Billing & Settlement', path: '/billing', icon: CreditCard },
-      { label: 'Expenses & Taxes', path: '/expenses', icon: ArrowDownRight },
+      { label: 'Billing', path: '/billing', icon: CreditCard },
+      { label: 'Expenses', path: '/expenses', icon: ArrowDownRight },
       { label: 'Discounts', path: '/discounts', icon: Tag }
     ]
   },
@@ -84,19 +84,19 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Platform Analytics', path: '/platform-analytics', icon: Activity },
       { label: 'Company Analytics', path: '/company-analytics', icon: BarChart3 },
-      { label: 'Reports Hub', path: '/reports', icon: ClipboardList }
+      { label: 'Reports', path: '/reports', icon: ClipboardList }
     ]
   },
   {
-    title: 'Communication',
+    title: '',
     items: [
-      { label: 'Services Requests', path: '/services', icon: Wrench },
+      { label: 'Services', path: '/services', icon: Wrench },
       { label: 'Reviews', path: '/reviews', icon: MessageSquare },
       { label: 'Notifications', path: '/notifications', icon: Bell }
     ]
   },
   {
-    title: 'System',
+    title: '',
     items: [
       { label: 'Settings', path: '/settings', icon: Settings },
       { label: 'Profile', path: '/profile', icon: User }
@@ -333,6 +333,16 @@ export default function DashboardLayout() {
               title="Toggle theme"
             >
               {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </button>
+
+            {/* Messages Icon */}
+            <button
+              onClick={() => navigate('/reviews')}
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors relative cursor-pointer"
+              title="View Messages/Reviews"
+            >
+              <MessageSquare className="h-5 w-5" />
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-accent border border-card" />
             </button>
 
             {/* Notifications Popover */}
