@@ -1,28 +1,28 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Sprout } from 'lucide-react';
+import { Eye, Briefcase } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
 import StatusBadge from '@/components/shared/StatusBadge';
-import { mockFarmers } from '@/mock-data/farmers';
-import type { FarmerItem } from '@/mock-data/farmers';
+import { mockServiceProviders } from '@/mock-data/service-providers';
+import type { ServiceProviderItem } from '@/mock-data/service-providers';
 
-export default function FarmerList() {
+export default function ServiceProviderList() {
   const navigate = useNavigate();
 
-  const [farmers] = useState<FarmerItem[]>(mockFarmers);
+  const [providers] = useState<ServiceProviderItem[]>(mockServiceProviders);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [sortKey, setSortKey] = useState<string>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  const columns: Column<FarmerItem>[] = [
-    { key: 'id', label: 'Farmer ID', sortable: true },
+  const columns: Column<ServiceProviderItem>[] = [
+    { key: 'id', label: 'ID', sortable: true },
     {
       key: 'name',
-      label: 'Farmer Name',
+      label: 'Service Provider',
       sortable: true,
       render: (row) => (
         <div className="flex flex-col">
@@ -31,10 +31,14 @@ export default function FarmerList() {
         </div>
       )
     },
-    { key: 'phone', label: 'Phone' },
+    { key: 'category', label: 'Category', sortable: true },
     { key: 'district', label: 'District', sortable: true },
-    { key: 'totalOrders', label: 'Orders Placed', align: 'center', sortable: true },
-    { key: 'totalSpent', label: 'Total Volume ($)', align: 'center', sortable: true },
+    {
+      key: 'rating',
+      label: 'Rating',
+      align: 'center',
+      render: (row) => <span className="font-bold text-foreground">★ {row.rating}</span>
+    },
     {
       key: 'status',
       label: 'Status',
@@ -48,9 +52,9 @@ export default function FarmerList() {
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
           <button
-            onClick={() => navigate(`/farmers/${row.id}`)}
+            onClick={() => navigate(`/service-providers/${row.id}`)}
             className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-lg transition-colors cursor-pointer"
-            title="View Profile Details"
+            title="View Details"
           >
             <Eye className="h-4.5 w-4.5" />
           </button>
@@ -64,13 +68,13 @@ export default function FarmerList() {
     setSortDirection(direction);
   };
 
-  const filteredFarmers = farmers
-    .filter((f) => {
+  const filteredProviders = providers
+    .filter((p) => {
       const matchSearch =
-        f.name.toLowerCase().includes(search.toLowerCase()) ||
-        f.id.toLowerCase().includes(search.toLowerCase()) ||
-        f.phone.includes(search);
-      const matchStatus = statusFilter === 'all' || f.status === statusFilter;
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.id.toLowerCase().includes(search.toLowerCase()) ||
+        p.category.toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === 'all' || p.status === statusFilter;
       return matchSearch && matchStatus;
     })
     .sort((a, b) => {
@@ -91,12 +95,12 @@ export default function FarmerList() {
     <div className="space-y-6">
       {/* Page Header */}
       <PageHeader
-        title="Farmers Registry"
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Farmers' }]}
+        title="Service Providers"
+        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Service Providers' }]}
         action={
           <div className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg shadow-sm">
-            <Sprout className="h-4 w-4" />
-            Farmers Registry (Monitor Only)
+            <Briefcase className="h-4 w-4" />
+            Service Providers Registry (Monitor Only)
           </div>
         }
       />
@@ -104,8 +108,8 @@ export default function FarmerList() {
       {/* Filter and Table List */}
       <DataTable
         columns={columns}
-        data={filteredFarmers}
-        searchPlaceholder="Search by ID, name, phone..."
+        data={filteredProviders}
+        searchPlaceholder="Search by ID, name, category..."
         searchValue={search}
         onSearchChange={setSearch}
         sortKey={sortKey}
@@ -119,9 +123,10 @@ export default function FarmerList() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="px-3 py-1.5 text-sm border border-border bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
             >
-              <option value="all">All Statuses</option>
-              <option value="active">Active Only</option>
-              <option value="suspended">Suspended Only</option>
+              <option value="all">All Verification States</option>
+              <option value="verified">Verified Only</option>
+              <option value="pending">Pending Verification</option>
+              <option value="rejected">Rejected Only</option>
             </select>
           </div>
         }

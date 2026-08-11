@@ -1,8 +1,8 @@
-import SalesAnalytics from './components/SalesAnalytics';
+import SalesTransactions from './components/SalesTransactions';
 
 export const SalesRoutes = [
   {
     path: '/sales',
-    element: <SalesAnalytics />
+    element: <SalesTransactions />
   }
 ];

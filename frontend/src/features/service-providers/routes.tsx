@@ -1,6 +1,13 @@
+import ServiceProviderList from './components/ServiceProviderList';
+import ServiceProviderDetails from './components/ServiceProviderDetails';
+
 export const ServiceProvidersRoutes = [
   {
     path: '/service-providers',
-    element: <div className="p-6 text-foreground bg-background rounded-xl border border-border shadow-sm">Service Providers Placeholder</div>
+    element: <ServiceProviderList />
+  },
+  {
+    path: '/service-providers/:id',
+    element: <ServiceProviderDetails />
   }
 ];

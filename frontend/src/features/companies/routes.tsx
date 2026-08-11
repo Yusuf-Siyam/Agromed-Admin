@@ -1,5 +1,7 @@
 import CompanyList from './components/CompanyList';
 import CompanyDetails from './components/CompanyDetails';
+import CompanyVerification from './components/CompanyVerification';
+import CompanyPerformance from './components/CompanyPerformance';
 
 export const CompaniesRoutes = [
   {
@@ -8,11 +10,11 @@ export const CompaniesRoutes = [
   },
   {
     path: '/companies/verification',
-    element: <div className="p-6 text-foreground bg-background rounded-xl border border-border shadow-sm">Company Verification Requests Placeholder</div>
+    element: <CompanyVerification />
   },
   {
     path: '/companies/performance',
-    element: <div className="p-6 text-foreground bg-background rounded-xl border border-border shadow-sm">Company Performance Analytics Placeholder</div>
+    element: <CompanyPerformance />
   },
   {
     path: '/companies/:id',

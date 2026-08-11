@@ -73,13 +73,8 @@ export default function FarmerDetails() {
             { label: farmer.name }
           ]}
           action={
-            <div className="flex gap-2">
-              <button
-                onClick={() => navigate('/farmers')}
-                className="px-3.5 py-1.5 border border-border bg-card hover:bg-muted text-foreground font-semibold text-xs rounded-lg transition-colors cursor-pointer"
-              >
-                Edit Profile
-              </button>
+            <div className="text-xs font-semibold text-muted-foreground bg-card border border-border px-3 py-1.5 rounded-lg shadow-sm">
+              Account Status: {farmer.status.toUpperCase()}
             </div>
           }
         />
