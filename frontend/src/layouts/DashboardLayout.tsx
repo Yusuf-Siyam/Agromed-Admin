@@ -4,10 +4,6 @@ import {
   LayoutDashboard,
   Building2,
   Sprout,
-  ShoppingBag,
-  Package,
-  Layers,
-  ClipboardList,
   Wrench,
   CreditCard,
   TrendingUp,
@@ -25,7 +21,15 @@ import {
   Search,
   ChevronDown,
   Sun,
-  Moon
+  Moon,
+  ShieldCheck,
+  Award,
+  Briefcase,
+  Percent,
+  ArrowDownRight,
+  Tag,
+  Activity,
+  ClipboardList
 } from 'lucide-react';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useToast } from '@/components/shared/Toast';
@@ -50,31 +54,45 @@ const navSections: NavSection[] = [
     ]
   },
   {
-    title: 'Management',
+    title: 'Companies',
     items: [
-      { label: 'Agro Companies', path: '/companies', icon: Building2 },
+      { label: 'All Companies', path: '/companies', icon: Building2 },
+      { label: 'Verification', path: '/companies/verification', icon: ShieldCheck },
+      { label: 'Performance', path: '/companies/performance', icon: Award }
+    ]
+  },
+  {
+    title: 'Stakeholders',
+    items: [
       { label: 'Farmers', path: '/farmers', icon: Sprout },
-      { label: 'Buyers', path: '/buyers', icon: ShoppingBag },
-      { label: 'Products', path: '/products', icon: Package },
-      { label: 'Categories', path: '/categories', icon: Layers },
-      { label: 'Orders', path: '/orders', icon: ClipboardList },
-      { label: 'Services', path: '/services', icon: Wrench },
-      { label: 'Payments', path: '/payments', icon: CreditCard }
+      { label: 'Service Providers', path: '/service-providers', icon: Briefcase }
+    ]
+  },
+  {
+    title: 'Financial',
+    items: [
+      { label: 'Sales', path: '/sales', icon: TrendingUp },
+      { label: 'Revenue', path: '/revenue', icon: DollarSign },
+      { label: 'Commission', path: '/commission', icon: Percent },
+      { label: 'Billing & Settlement', path: '/billing', icon: CreditCard },
+      { label: 'Expenses & Taxes', path: '/expenses', icon: ArrowDownRight },
+      { label: 'Discounts', path: '/discounts', icon: Tag }
     ]
   },
   {
     title: 'Analytics',
     items: [
-      { label: 'Sales', path: '/sales', icon: TrendingUp },
-      { label: 'Revenue', path: '/revenue', icon: DollarSign },
-      { label: 'Reports', path: '/reports', icon: BarChart3 }
+      { label: 'Platform Analytics', path: '/platform-analytics', icon: Activity },
+      { label: 'Company Analytics', path: '/company-analytics', icon: BarChart3 },
+      { label: 'Reports Hub', path: '/reports', icon: ClipboardList }
     ]
   },
   {
     title: 'Communication',
     items: [
-      { label: 'Notifications', path: '/notifications', icon: Bell },
-      { label: 'Reviews', path: '/reviews', icon: MessageSquare }
+      { label: 'Services Requests', path: '/services', icon: Wrench },
+      { label: 'Reviews', path: '/reviews', icon: MessageSquare },
+      { label: 'Notifications', path: '/notifications', icon: Bell }
     ]
   },
   {
