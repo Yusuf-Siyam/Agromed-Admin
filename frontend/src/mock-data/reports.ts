@@ -8,32 +8,32 @@ export interface ReportType {
 export const mockReportTypes: ReportType[] = [
   {
     id: 'REP-SALES',
-    name: 'Sales Performance Audit',
-    description: 'Detailed analysis of sales volumes, item collections, average transaction checks, and growth metrics across specific timelines.',
-    fields: ['Start Date', 'End Date', 'Product Segment', 'Regional Zone']
+    name: 'Sales Report',
+    description: 'Detailed audit of gross sales transactions (GMV) by company, transaction values, and date ranges.',
+    fields: ['Date Range', 'Company Name', 'Transaction Value', 'Commission Rate %']
   },
   {
     id: 'REP-COMPANY',
-    name: 'Agro Company Revenue Audit',
-    description: 'Corporate ranking reports tracking total commission cuts, product catalog sizes, active services, and customer feedback ratings.',
-    fields: ['Company ID', 'Financial Year', 'Performance Tier']
+    name: 'Company Report',
+    description: 'Corporate performance summaries, licensing verifications, catalog size, and overall billing contribution share splits.',
+    fields: ['Company ID', 'Verification Status', 'Joined Date', 'Rating Score']
   },
   {
     id: 'REP-REVENUE',
-    name: 'Revenue & Commission Analysis',
-    description: 'Summary ledger tracking gross revenue, net platform commissions, payment gateway fees, and refunded transactions.',
-    fields: ['Billing Method', 'Tax Cycle', 'Payout Status']
+    name: 'Revenue Report',
+    description: 'Consolidated platform commission revenue ledger tracking earnings, deductions, and tax cuts.',
+    fields: ['Billing Date', 'Revenue Stream Type', 'Amount Earned', 'Status']
   },
   {
-    id: 'REP-PRODUCT',
-    name: 'Product Inventory & Demand',
-    description: 'Report tracking catalog stock levels, low stock alerts, highest selling brands, and non-performing SKUs.',
-    fields: ['Category', 'Stock Threshold Filter', 'Supplier']
+    id: 'REP-COMMISSION',
+    name: 'Commission Report',
+    description: 'Platform commission overrides ledger detailing default cuts, specific overrides, and earned vs pending balances.',
+    fields: ['Company Name', 'Standard/Override Rate %', 'Earnings Owed', 'Payment Status']
   },
   {
-    id: 'REP-USER',
-    name: 'Platform User Growth Log',
-    description: 'Tracking numbers for new farmers registrations, wholesale buyers, geographic distributions, and active login sessions.',
-    fields: ['User Role (Farmer/Buyer)', 'District', 'Registration Year']
+    id: 'REP-SETTLEMENT',
+    name: 'Settlement Report',
+    description: 'Detailed company payout settlements detailing gross sales, discount deductions, tax cuts, and final net settlement paid.',
+    fields: ['Settlement ID', 'Gross GMV', 'Discounts Cut', 'Taxes & Fees Cut', 'Final Settlement Paid']
   }
 ];
