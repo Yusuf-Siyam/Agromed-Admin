@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Settings, Lock, Palette, Info, Check, Loader2 } from 'lucide-react';
+import { Settings, Lock, Palette, Info, Check, Loader2, User } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import { useToast } from '@/components/shared/Toast';
 import { cn } from '@/lib/utils';
 
-type ActiveTab = 'general' | 'platform' | 'password' | 'theme';
+type ActiveTab = 'general' | 'platform' | 'profile' | 'password' | 'theme';
 
 export default function SettingsView() {
   const { success, error } = useToast();
@@ -18,9 +18,15 @@ export default function SettingsView() {
   const [supportPhone, setSupportPhone] = useState('+880 9612-445566');
 
   // Form states - Platform
-  const [commissionRate, setCommissionRate] = useState('8.5');
+  const [commissionRate, setCommissionRate] = useState('10.0');
+  const [taxRate, setTaxRate] = useState('5.0');
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [minPayoutAmount, setMinPayoutAmount] = useState('100.00');
+  const [minPayoutAmount, setMinPayoutAmount] = useState('250.00');
+
+  // Form states - Profile Settings
+  const [adminName, setAdminName] = useState('Yusuf Siyam');
+  const [adminEmail, setAdminEmail] = useState('yusuf.siyam@agromed.connect');
+  const [adminPhone, setAdminPhone] = useState('+880 1711-223344');
 
   // Form states - Change Password
   const [currentPassword, setCurrentPassword] = useState('');
@@ -50,11 +56,27 @@ export default function SettingsView() {
       return;
     }
 
+    const parsedTax = parseFloat(taxRate);
+    if (isNaN(parsedTax) || parsedTax < 0 || parsedTax > 100) {
+      error('Tax rate percentage must be between 0 and 100');
+      return;
+    }
+
     setIsLoading(true);
 
     setTimeout(() => {
       setIsLoading(false);
       success('Platform system configuration updated');
+    }, 1000);
+  };
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      success('Admin profile credentials updated');
     }, 1000);
   };
 
@@ -105,6 +127,7 @@ export default function SettingsView() {
           {[
             { id: 'general' as const, label: 'General Info', icon: Info },
             { id: 'platform' as const, label: 'Platform Controls', icon: Settings },
+            { id: 'profile' as const, label: 'Admin Profile', icon: User },
             { id: 'password' as const, label: 'Security & Access', icon: Lock },
             { id: 'theme' as const, label: 'Visual Themes', icon: Palette }
           ].map((tab) => {
@@ -202,19 +225,31 @@ export default function SettingsView() {
 
                 <div className="grid grid-cols-1 gap-4 max-w-xl">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Transaction Commission Rate (%)</label>
+                    <label className="text-[11px] font-bold text-foreground/80">Default Commission Rate (%)</label>
                     <input
                       type="text"
                       required
                       value={commissionRate}
                       onChange={(e) => setCommissionRate(e.target.value)}
                       disabled={isLoading}
-                      placeholder="8.5"
+                      placeholder="10.0"
                       className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Minimum Farmer Payout Balance ($)</label>
+                    <label className="text-[11px] font-bold text-foreground/80">Default Platform Tax Rate (%)</label>
+                    <input
+                      type="text"
+                      required
+                      value={taxRate}
+                      onChange={(e) => setTaxRate(e.target.value)}
+                      disabled={isLoading}
+                      placeholder="5.0"
+                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground/80">Minimum Settlement Payout Balance ($)</label>
                     <input
                       type="text"
                       required
@@ -252,6 +287,63 @@ export default function SettingsView() {
                   >
                     {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                     Save Parameters
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Profile Settings */}
+            {activeTab === 'profile' && (
+              <form onSubmit={handleSaveProfile} className="space-y-5 animate-in fade-in duration-200">
+                <div className="border-b border-border/60 pb-3">
+                  <h3 className="text-base font-bold text-foreground">Admin Profile Settings</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">Configure your administrator account details.</p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 max-w-xl">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground/80">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={adminName}
+                      onChange={(e) => setAdminName(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground/80">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      value={adminEmail}
+                      onChange={(e) => setAdminEmail(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-foreground/80">Contact Phone</label>
+                    <input
+                      type="text"
+                      required
+                      value={adminPhone}
+                      onChange={(e) => setAdminPhone(e.target.value)}
+                      disabled={isLoading}
+                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
+                  >
+                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    Save Profile
                   </button>
                 </div>
               </form>
