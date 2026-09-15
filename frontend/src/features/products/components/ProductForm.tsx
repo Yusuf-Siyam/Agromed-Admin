@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
+import { ArrowLeft, Loader2, Lock, Save } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import { useToast } from '@/components/shared/Toast';
-import { mockProducts } from '@/mock-data/products';
+import { useApi } from '@/lib/useApi';
+import { listListings } from '@/lib/superadmin-api';
 
 export default function ProductForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { success, error } = useToast();
+  const { error } = useToast();
 
   const isEditMode = !!id;
 
-  // Form states
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
   const [price, setPrice] = useState('');
@@ -22,38 +22,38 @@ export default function ProductForm() {
   const [companyName, setCompanyName] = useState('');
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
   const [description, setDescription] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const isLoading = false;
 
-  // Error states
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Load product if edit mode
+  const listings = useApi((token) => listListings(token, { kind: 'product', limit: 100 }), []);
+
   useEffect(() => {
-    if (isEditMode) {
-      const prod = mockProducts.find((p) => p.id === id);
-      if (prod) {
-        setName(prod.name);
-        setCategory(prod.category);
-        setPrice(prod.price.toString());
-        setStock(prod.stock.toString());
-        setLowStockLimit(prod.lowStockLimit.toString());
-        setSku(prod.sku);
-        setCompanyName(prod.companyName);
-        setStatus(prod.status);
-        setDescription(prod.description);
-      } else {
-        error('Product to edit not found');
-        navigate('/products');
-      }
+    if (!isEditMode || !listings.data) return;
+    const prod = listings.data.items.find((p) => p.id === id);
+    if (!prod) {
+      error('That listing was not found.');
+      navigate('/products');
+      return;
     }
-  }, [id, isEditMode, navigate, error]);
+
+    setName(prod.nameEn ?? prod.sku);
+    setCategory(prod.categoryCode);
+    setPrice(prod.fromPriceMinor == null ? '' : (prod.fromPriceMinor / 100).toString());
+    setStock(String(prod.stockOnHand));
+    setLowStockLimit('');
+    setSku(prod.sku);
+    setCompanyName(prod.sellerName);
+    setStatus(prod.status === 'active' ? 'active' : 'inactive');
+    setDescription('');
+  }, [id, isEditMode, listings.data, navigate, error]);
 
   const validateForm = () => {
     const errs: Record<string, string> = {};
 
     if (!name.trim()) errs.name = 'Product name is required';
     if (!category) errs.category = 'Category is required';
-    
+
     const parsedPrice = parseFloat(price);
     if (isNaN(parsedPrice) || parsedPrice <= 0) {
       errs.price = 'Price must be a positive number';
@@ -85,19 +85,12 @@ export default function ProductForm() {
       return;
     }
 
-    setIsLoading(true);
-
-    // Simulate API save
-    setTimeout(() => {
-      setIsLoading(false);
-      success(isEditMode ? 'Product updated successfully' : 'Product registered successfully');
-      navigate('/products');
-    }, 1200);
+    error('The platform console cannot edit a seller’s listing. The company does this in its own portal.');
   };
 
   return (
     <div className="space-y-6">
-      {/* Back button */}
+      { }
       <div className="space-y-2">
         <button
           onClick={() => navigate('/products')}
@@ -116,11 +109,24 @@ export default function ProductForm() {
         />
       </div>
 
-      {/* Form Card */}
+      { }
+      <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/40 p-4">
+        <Lock className="mt-0.5 h-4.5 w-4.5 shrink-0 text-muted-foreground" />
+        <div className="space-y-1 text-sm">
+          <p className="font-semibold text-foreground">Read-only</p>
+          <p className="text-muted-foreground">
+            Listings belong to the company that published them. Creating, pricing and withdrawing
+            one happens in that company&rsquo;s own portal, where its licences and certificates are
+            checked. This screen shows the live values.
+          </p>
+        </div>
+      </div>
+
+      { }
       <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm max-w-3xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Name */}
+            { }
             <div className="space-y-1.5 md:col-span-2">
               <label htmlFor="name" className="text-xs font-bold text-foreground/80">
                 Product Title / Name
@@ -142,7 +148,7 @@ export default function ProductForm() {
               {errors.name && <p className="text-xs font-medium text-destructive">{errors.name}</p>}
             </div>
 
-            {/* Category */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="category" className="text-xs font-bold text-foreground/80">
                 Product Category
@@ -169,10 +175,10 @@ export default function ProductForm() {
               {errors.category && <p className="text-xs font-medium text-destructive">{errors.category}</p>}
             </div>
 
-            {/* Price */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="price" className="text-xs font-bold text-foreground/80">
-                Unit Price (USD)
+                Unit Price (BDT)
               </label>
               <input
                 id="price"
@@ -191,7 +197,7 @@ export default function ProductForm() {
               {errors.price && <p className="text-xs font-medium text-destructive">{errors.price}</p>}
             </div>
 
-            {/* Stock */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="stock" className="text-xs font-bold text-foreground/80">
                 Stock Quantity
@@ -213,7 +219,7 @@ export default function ProductForm() {
               {errors.stock && <p className="text-xs font-medium text-destructive">{errors.stock}</p>}
             </div>
 
-            {/* Low Stock Limit */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="lowStockLimit" className="text-xs font-bold text-foreground/80">
                 Low Stock Threshold
@@ -235,7 +241,7 @@ export default function ProductForm() {
               {errors.lowStockLimit && <p className="text-xs font-medium text-destructive">{errors.lowStockLimit}</p>}
             </div>
 
-            {/* SKU */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="sku" className="text-xs font-bold text-foreground/80">
                 SKU / Catalog Identification
@@ -257,7 +263,7 @@ export default function ProductForm() {
               {errors.sku && <p className="text-xs font-medium text-destructive">{errors.sku}</p>}
             </div>
 
-            {/* Supplier company */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="companyName" className="text-xs font-bold text-foreground/80">
                 Supplier Agro Company
@@ -279,7 +285,7 @@ export default function ProductForm() {
               {errors.companyName && <p className="text-xs font-medium text-destructive">{errors.companyName}</p>}
             </div>
 
-            {/* Status Option */}
+            { }
             <div className="space-y-1.5">
               <label htmlFor="status" className="text-xs font-bold text-foreground/80">
                 Catalog Status
@@ -297,7 +303,7 @@ export default function ProductForm() {
             </div>
           </div>
 
-          {/* Description */}
+          { }
           <div className="space-y-1.5">
             <label htmlFor="description" className="text-xs font-bold text-foreground/80">
               Product Description
@@ -319,7 +325,7 @@ export default function ProductForm() {
             {errors.description && <p className="text-xs font-medium text-destructive">{errors.description}</p>}
           </div>
 
-          {/* Save button */}
+          { }
           <div className="flex justify-end gap-3 pt-2">
             <Link
               to="/products"

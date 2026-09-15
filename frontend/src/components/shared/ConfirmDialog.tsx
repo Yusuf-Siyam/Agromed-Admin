@@ -25,7 +25,6 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
-  // Variant setups
   let icon = <Info className="h-6 w-6 text-primary" />;
   let iconBg = 'bg-primary/10';
   let confirmBtnClass = 'bg-primary hover:bg-primary/90 text-primary-foreground';
@@ -42,13 +41,13 @@ export default function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      {/* Backdrop */}
+      { }
       <div
         className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-200"
         onClick={onCancel}
       />
 
-      {/* Dialog Body */}
+      { }
       <div
         className="bg-card border border-border/80 w-full max-w-md rounded-xl p-6 shadow-xl relative z-10 transform transition-all duration-200 scale-100 animate-in fade-in zoom-in-95"
         role="dialog"
@@ -68,7 +67,7 @@ export default function ConfirmDialog({
           </div>
         </div>
 
-        {/* Buttons */}
+        { }
         <div className="mt-6 flex justify-end gap-3">
           <button
             onClick={onCancel}

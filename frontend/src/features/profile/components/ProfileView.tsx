@@ -1,47 +1,116 @@
-import { useState } from 'react';
-import { User, ShieldCheck, Calendar, Info, Loader2, Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { User, ShieldCheck, Camera, Loader2, Check } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import { useToast } from '@/components/shared/Toast';
-import { cn } from '@/lib/utils';
+import { useApi, useApiAction } from '@/lib/useApi';
+import { useSuperAdminSession } from '@/features/auth/SuperAdminSession';
+import { avatarUrl, getCurrentUser, updateProfile, uploadAvatar } from '@/lib/superadmin-api';
+import PlatformTeam from './PlatformTeam';
 
 export default function ProfileView() {
-  const { success } = useToast();
+  const { success, error } = useToast();
+  const { run, busy } = useApiAction();
+  const { accessToken } = useSuperAdminSession();
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [adminName, setAdminName] = useState('Siyam Administrator');
-  const [adminEmail, setAdminEmail] = useState('siyam.admin@agromed.connect');
-  const [adminPhone, setAdminPhone] = useState('+880 1711-223344');
+  const pickFile = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const [avatarVersion, setAvatarVersion] = useState(0);
+
+  const me = useApi((token) => getCurrentUser(token), []);
+  const isLoading = me.loading || busy;
+
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPhone, setAdminPhone] = useState('');
+
+  useEffect(() => {
+    if (!me.data) return;
+
+    setAdminName(me.data.fullName);
+    setAdminEmail(me.data.email ?? '');
+    setAdminPhone(me.data.phone ?? '');
+  }, [me.data]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    if (adminName.trim().length < 2) {
+      error('Enter your name.');
+      return;
+    }
+    const ok = await run((token) => updateProfile(token, adminName.trim(), adminEmail.trim() || null));
+    if (ok) {
+      success('Profile updated.');
+      me.reload();
+    } else {
+      error('Your profile could not be updated.');
+    }
+  };
 
-    setTimeout(() => {
-      setIsLoading(false);
-      success('Administrator Profile updated successfully');
-    }, 1000);
+  const handleAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !accessToken) return;
+
+    setUploading(true);
+    try {
+      await uploadAvatar(accessToken, file);
+      setAvatarVersion((v) => v + 1);
+      success('Profile picture updated.');
+    } catch (err) {
+      error(err instanceof Error ? err.message : 'That picture could not be uploaded.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
+      { }
       <PageHeader title="Administrator Profile" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Admin Profile' }]} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column Profile info Card */}
+
+        { }
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm flex flex-col items-center text-center space-y-4">
-            
-            {/* Avatar block */}
+
+            { }
             <div className="relative">
-              <div className="w-24 h-24 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-4xl font-extrabold uppercase shadow-inner">
-                {adminName.substring(0, 2)}
-              </div>
-              <span className="absolute bottom-0 right-0 p-1.5 bg-info border border-card rounded-full text-card-foreground">
-                <ShieldCheck className="h-4.5 w-4.5 text-card bg-info" />
+              {me.data ? (
+                <img
+                  key={avatarVersion}
+                  src={`${avatarUrl(me.data.id)}?v=${avatarVersion}`}
+                  alt=""
+                  className="h-24 w-24 rounded-full border border-primary/20 bg-primary/10 object-cover shadow-inner"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                />
+              ) : (
+                <div className="flex h-24 w-24 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-4xl font-extrabold uppercase text-primary shadow-inner">
+                  {adminName.substring(0, 2)}
+                </div>
+              )}
+              <span className="absolute bottom-0 right-0 rounded-full border border-card bg-info p-1.5 text-card-foreground">
+                <ShieldCheck className="h-4.5 w-4.5 bg-info text-card" />
               </span>
             </div>
+
+            <input
+              ref={pickFile}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={handleAvatar}
+            />
+            <button
+              type="button"
+              onClick={() => pickFile.current?.click()}
+              disabled={uploading}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+              {uploading ? 'Uploading…' : 'Change picture'}
+            </button>
 
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-foreground">{adminName}</h3>
@@ -51,35 +120,37 @@ export default function ProfileView() {
             <div className="w-full border-t border-border/60 my-2" />
 
             <div className="w-full text-xs font-semibold space-y-2.5 text-left">
+              {
+
+}
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Admin ID:</span>
-                <span className="font-mono text-foreground font-bold">ADM-9018</span>
+                <span className="text-muted-foreground">User ID:</span>
+                <span className="font-mono text-[10px] font-bold text-foreground">
+                  {me.data ? me.data.id.slice(0, 8) : '—'}
+                </span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Assigned Region:</span>
-                <span>Dhaka HQ, Bangladesh</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Access Clearance:</span>
-                <span className="text-[10px] bg-primary/15 text-primary border border-primary/20 px-2 py-0.5 rounded font-bold uppercase">
-                  Level 5 Max
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-muted-foreground">Roles:</span>
+                <span className="flex flex-wrap justify-end gap-1">
+                  {(me.data?.roles ?? []).map((r) => (
+                    <span key={r} className="rounded border border-primary/20 bg-primary/15 px-2 py-0.5 text-[10px] font-bold uppercase text-primary">
+                      {r.replace(/_/g, ' ')}
+                    </span>
+                  ))}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Member Since:</span>
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                  2025-01-10
-                </span>
+                <span className="text-muted-foreground">Sign-in email:</span>
+                <span className="text-foreground">{me.data?.email ?? '—'}</span>
               </div>
             </div>
 
           </div>
         </div>
 
-        {/* Right Columns form details and sessions log */}
+        { }
         <div className="lg:col-span-2 space-y-6">
-          {/* Edit Form */}
+          { }
           <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm">
             <h3 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2 mb-4">
               <User className="h-4.5 w-4.5 text-primary" />
@@ -100,7 +171,7 @@ export default function ProfileView() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-foreground/80">Logins Contact Email</label>
+                  <label className="text-[11px] font-bold text-foreground/80">Contact email</label>
                   <input
                     type="email"
                     required
@@ -112,14 +183,18 @@ export default function ProfileView() {
                 </div>
                 <div className="space-y-1 md:col-span-2">
                   <label className="text-[11px] font-bold text-foreground/80">Contact Phone Number</label>
+                  {
+
+}
                   <input
                     type="text"
-                    required
+                    readOnly
                     value={adminPhone}
-                    onChange={(e) => setAdminPhone(e.target.value)}
-                    disabled={isLoading}
-                    className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    className="w-full px-3 py-2 text-xs border border-border bg-muted/40 text-muted-foreground rounded-lg focus:outline-none"
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    Your phone number is your sign-in identifier and cannot be changed here.
+                  </p>
                 </div>
               </div>
 
@@ -136,38 +211,7 @@ export default function ProfileView() {
             </form>
           </div>
 
-          {/* Active login sessions audit */}
-          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
-              <Info className="h-4.5 w-4.5 text-primary" />
-              Active Admin Sessions
-            </h3>
-
-            <div className="space-y-3.5 text-xs font-semibold">
-              {[
-                { ip: '103.25.244.18', client: 'Chrome 125.0 / Windows 11', time: 'Active Now (Current Session)', status: 'current' },
-                { ip: '192.168.1.42', client: 'Safari iOS 17.4 / iPhone 15', time: 'Logged: 2026-07-17 04:12 PM', status: 'active' }
-              ].map((sess, idx) => (
-                <div key={idx} className="flex justify-between items-start border-b border-border/40 pb-3 last:border-b-0 last:pb-0">
-                  <div className="space-y-0.5">
-                    <p className="text-foreground">{sess.client}</p>
-                    <span className="text-[10px] text-muted-foreground font-mono font-medium block">IP Address: {sess.ip}</span>
-                  </div>
-                  <div className="text-right space-y-1">
-                    <span className={cn(
-                      'text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border',
-                      sess.status === 'current'
-                        ? 'bg-primary/10 border-primary/20 text-primary'
-                        : 'bg-muted border-border text-muted-foreground'
-                    )}>
-                      {sess.status === 'current' ? 'Current Session' : 'Active'}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-medium block pt-0.5">{sess.time}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <PlatformTeam />
         </div>
 
       </div>

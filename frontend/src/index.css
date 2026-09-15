@@ -4,69 +4,69 @@
 
 @layer base {
   :root {
-    --background: 43 57% 88%; /* #F2E8CF */
-    --foreground: 148 100% 8%; /* Very dark green */
-    
+    --background: 43 57% 88%;
+    --foreground: 148 100% 8%;
+
     --card: 0 0% 100%;
     --card-foreground: 148 100% 8%;
-    
+
     --popover: 0 0% 100%;
     --popover-foreground: 148 100% 8%;
-    
-    --primary: 148 100% 15%; /* #004B23 */
+
+    --primary: 148 100% 15%;
     --primary-foreground: 43 57% 96%;
-    
-    --secondary: 98 32% 45%; /* #6A994E */
+
+    --secondary: 98 32% 45%;
     --secondary-foreground: 43 57% 96%;
-    
+
     --muted: 43 30% 82%;
     --muted-foreground: 148 40% 25%;
-    
-    --accent: 78 51% 56%; /* #A7C957 */
+
+    --accent: 78 51% 56%;
     --accent-foreground: 148 100% 15%;
-    
+
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    
+
     --border: 43 25% 78%;
     --input: 43 25% 78%;
     --ring: 148 100% 15%;
-    
-    --info: 98 32% 45%; /* #6A994E */
+
+    --info: 98 32% 45%;
     --info-foreground: 0 0% 100%;
-    
-    --radius: 0.75rem;
+
+    --radius: 0.875rem;
   }
 
   .dark {
     --background: 148 50% 6%;
     --foreground: 43 57% 92%;
-    
+
     --card: 148 45% 9%;
     --card-foreground: 43 57% 92%;
-    
+
     --popover: 148 45% 9%;
     --popover-foreground: 43 57% 92%;
-    
+
     --primary: 148 80% 25%;
     --primary-foreground: 43 57% 92%;
-    
+
     --secondary: 98 32% 45%;
     --secondary-foreground: 43 57% 92%;
-    
+
     --muted: 148 20% 15%;
     --muted-foreground: 148 15% 65%;
-    
+
     --accent: 78 40% 30%;
     --accent-foreground: 43 57% 92%;
-    
+
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
-    
+
     --border: 148 25% 18%;
     --input: 148 25% 18%;
     --ring: 148 80% 25%;
-    
+
     --info: 98 32% 45%;
     --info-foreground: 0 0% 100%;
   }
@@ -80,5 +80,65 @@
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  }
+
+  button, a, input {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .dashboard-surface {
+    background-image:
+      radial-gradient(circle at 96% 2%, hsl(var(--accent) / 0.25), transparent 27rem),
+      radial-gradient(circle at 8% 92%, hsl(var(--secondary) / 0.18), transparent 34rem),
+      linear-gradient(135deg, hsl(var(--background)), hsl(var(--background)) 56%, hsl(var(--accent) / 0.10));
+  }
+
+  .dashboard-card {
+    @apply border border-border/80 rounded-2xl shadow-sm;
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--card)) 42%, hsl(var(--accent) / 0.28) 100%);
+    box-shadow: 0 12px 32px hsl(var(--primary) / 0.07), 0 1px 2px hsl(var(--primary) / 0.05);
+  }
+
+  .dashboard-card:hover {
+    box-shadow: 0 18px 36px hsl(var(--primary) / 0.12), 0 2px 4px hsl(var(--primary) / 0.06);
+  }
+
+  .dashboard-sidebar {
+    background-color: hsl(var(--primary));
+    background-image:
+      radial-gradient(circle at 0% 0%, hsl(var(--accent) / 0.18), transparent 15rem),
+      linear-gradient(165deg, hsl(var(--primary)) 20%, hsl(var(--primary)) 68%, hsl(var(--secondary) / 0.45));
+  }
+
+  .dashboard-action {
+    @apply border border-border text-foreground font-bold text-xs rounded-xl shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md cursor-pointer;
+    background: linear-gradient(135deg, hsl(var(--background)), hsl(var(--card)) 76%, hsl(var(--accent) / 0.16));
+  }
+
+  .dashboard-status {
+    background: linear-gradient(135deg, hsl(var(--primary) / 0.12), hsl(var(--secondary) / 0.18));
+  }
+
+  .metric-card-info {
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(135deg, hsl(var(--primary) / 0.24), hsl(var(--card)) 62%, hsl(var(--accent) / 0.30));
+  }
+
+  .metric-card-success {
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(135deg, hsl(var(--info) / 0.28), hsl(var(--card)) 62%, hsl(var(--accent) / 0.34));
+  }
+
+  .metric-card-warning {
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(135deg, hsl(var(--secondary) / 0.30), hsl(var(--card)) 62%, hsl(var(--accent) / 0.24));
+  }
+
+  .metric-card-danger {
+    background-color: hsl(var(--card));
+    background-image: linear-gradient(135deg, hsl(var(--destructive) / 0.16), hsl(var(--card)) 64%, hsl(var(--accent) / 0.18));
   }
 }

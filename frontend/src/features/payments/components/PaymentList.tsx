@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { CreditCard, DollarSign, ShieldCheck, Check, Ban, TrendingUp } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Ban, Check, CreditCard, DollarSign, ShieldCheck, TrendingUp } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
@@ -7,227 +7,221 @@ import StatusBadge from '@/components/shared/StatusBadge';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import StatCard from '@/components/shared/StatCard';
 import { useToast } from '@/components/shared/Toast';
-import { mockPayments, mockRefundRequests } from '@/mock-data/payments';
-import type { PaymentHistoryItem, RefundRequestItem } from '@/mock-data/payments';
+import { useApi, useApiAction } from '@/lib/useApi';
+import { formatDate, formatMinor, listCases, listPayments, transitionReturn } from '@/lib/superadmin-api';
+import type { AdminPayment, CaseQueueItem } from '@/lib/superadmin-api';
+
+const GATEWAYS = [
+  { value: 'all', label: 'All methods' },
+  { value: 'bkash', label: 'bKash' },
+  { value: 'nagad', label: 'Nagad' },
+  { value: 'card', label: 'Card' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'cash_on_delivery', label: 'Cash on delivery' }
+];
+
+const METHOD_LABEL: Record<string, string> = {
+  bkash: 'bKash', nagad: 'Nagad', rocket: 'Rocket', card: 'Card',
+  bank_transfer: 'Bank transfer', cash_on_delivery: 'Cash on delivery', credit: 'Credit'
+};
 
 export default function PaymentList() {
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
+  const { run, busy } = useApiAction();
 
-  const [payments] = useState<PaymentHistoryItem[]>(mockPayments);
-  const [refundRequests, setRefundRequests] = useState<RefundRequestItem[]>(mockRefundRequests);
-
-  // Search & Filter state
   const [paymentSearch, setPaymentSearch] = useState('');
   const [methodFilter, setMethodFilter] = useState('all');
+  const [activeRefundAction, setActiveRefundAction] =
+    useState<{ type: 'approve' | 'reject'; refund: CaseQueueItem } | null>(null);
 
-  // Refund actions state
-  const [activeRefundAction, setActiveRefundAction] = useState<{
-    type: 'approve' | 'reject';
-    refund: RefundRequestItem;
-  } | null>(null);
+  const payments = useApi(
+    (token) => listPayments(token, { method: methodFilter === 'all' ? undefined : methodFilter, limit: 100 }),
+    [methodFilter]
+  );
 
-  // Financial statistics calculation
-  const totalRevenue = '$248,500.00';
-  const sslGross = '$184,200.00';
-  const codGross = '$64,300.00';
-  const successPcts = '94.2%';
+  const refunds = useApi((token) => listCases(token, 'return', { status: 'requested', limit: 50 }), []);
 
-  // Payment Table Columns
-  const paymentColumns: Column<PaymentHistoryItem>[] = [
-    { key: 'id', label: 'Txn ID' },
+  const rows = useMemo(() => {
+    const items = payments.data?.items ?? [];
+    const needle = paymentSearch.trim().toLowerCase();
+    if (!needle) return items;
+
+    return items.filter((p) =>
+      p.orderNumber.toLowerCase().includes(needle) ||
+      (p.providerReference ?? '').toLowerCase().includes(needle) ||
+      p.buyerName.toLowerCase().includes(needle) ||
+      p.sellerName.toLowerCase().includes(needle));
+  }, [payments.data, paymentSearch]);
+
+  const totals = useMemo(() => {
+    const items = payments.data?.items ?? [];
+    const captured = items.filter((p) => p.status === 'captured');
+    const currency = items[0]?.currency ?? 'BDT';
+    const sum = (list: AdminPayment[]) => list.reduce((t, p) => t + p.amountMinor, 0);
+    const cod = captured.filter((p) => p.method === 'cash_on_delivery');
+    const online = captured.filter((p) => p.method !== 'cash_on_delivery');
+    const settled = items.filter((p) => p.status !== 'pending');
+    return {
+      currency,
+      total: sum(captured),
+      online: sum(online),
+      cod: sum(cod),
+      successRate: settled.length === 0 ? null : (captured.length / settled.length) * 100
+    };
+  }, [payments.data]);
+
+  const paymentColumns: Column<AdminPayment>[] = [
     {
-      key: 'payerName',
-      label: 'Payer Customer',
+      key: 'orderNumber',
+      label: 'Order',
       render: (row) => (
         <div className="flex flex-col">
-          <span className="font-semibold text-foreground">{row.payerName}</span>
-          <span className="text-xs text-muted-foreground">{row.payerPhone}</span>
+          <span className="font-semibold text-foreground">{row.orderNumber}</span>
+          <span className="text-xs text-muted-foreground">{row.providerReference ?? 'No gateway reference'}</span>
         </div>
       )
     },
     {
-      key: 'method',
-      label: 'Payment Method',
+      key: 'buyerName',
+      label: 'Payer',
       render: (row) => (
-        <span className="font-bold text-xs uppercase text-foreground/80">
-          {row.method}
-        </span>
+        <div className="flex flex-col">
+          <span className="font-semibold text-foreground">{row.buyerName}</span>
+          <span className="text-xs text-muted-foreground">to {row.sellerName}</span>
+        </div>
       )
     },
-    { key: 'amount', label: 'Amount Paid', align: 'center' },
+    { key: 'method', label: 'Method', render: (row) => METHOD_LABEL[row.method] ?? row.method },
     {
-      key: 'status',
-      label: 'Status',
-      render: (row) => <StatusBadge status={row.status} />
+      key: 'amountMinor',
+      label: 'Amount',
+      align: 'right',
+      render: (row) => <span className="font-semibold">{formatMinor(row.amountMinor, row.currency)}</span>
     },
-    { key: 'date', label: 'Date', sortable: true }
+    { key: 'createdAt', label: 'Date', render: (row) => formatDate(row.createdAt) },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> }
   ];
 
-  // Refund Table Columns
-  const refundColumns: Column<RefundRequestItem>[] = [
-    { key: 'id', label: 'Req ID' },
-    { key: 'orderId', label: 'Order ID' },
-    { key: 'customerName', label: 'Customer Name', render: (row) => <span className="font-semibold">{row.customerName}</span> },
-    { key: 'reason', label: 'Refund Reason', render: (row) => <span className="text-xs text-muted-foreground line-clamp-1">{row.reason}</span> },
-    { key: 'amount', label: 'Refund Amount', align: 'center' },
+  const refundColumns: Column<CaseQueueItem>[] = [
+    { key: 'id', label: 'Case', render: (row) => <span className="font-mono text-xs">{row.id.slice(0, 8)}</span> },
     {
-      key: 'status',
-      label: 'Status',
-      render: (row) => <StatusBadge status={row.status} />
+      key: 'amountMinor',
+      label: 'Refund',
+      align: 'right',
+      render: (row) => <span className="font-semibold">{formatMinor(row.amountMinor)}</span>
     },
+    { key: 'createdAt', label: 'Raised', render: (row) => formatDate(row.createdAt) },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
       key: 'actions',
       label: 'Actions',
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
-          {row.status === 'pending' && (
-            <>
-              <button
-                onClick={() => setActiveRefundAction({ type: 'approve', refund: row })}
-                className="p-1.5 hover:bg-info/10 text-info hover:text-info rounded-lg transition-colors cursor-pointer"
-                title="Approve Refund"
-              >
-                <Check className="h-4.5 w-4.5" />
-              </button>
-              <button
-                onClick={() => setActiveRefundAction({ type: 'reject', refund: row })}
-                className="p-1.5 hover:bg-destructive/10 text-destructive hover:text-destructive rounded-lg transition-colors cursor-pointer"
-                title="Reject Refund"
-              >
-                <Ban className="h-4.5 w-4.5" />
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => setActiveRefundAction({ type: 'approve', refund: row })}
+            className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+            title="Approve refund"
+          >
+            <Check className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setActiveRefundAction({ type: 'reject', refund: row })}
+            className="p-1.5 hover:bg-destructive/10 text-destructive rounded-lg transition-colors cursor-pointer"
+            title="Reject refund"
+          >
+            <Ban className="h-4 w-4" />
+          </button>
         </div>
       )
     }
   ];
 
-  // Payment filtering
-  const filteredPayments = payments.filter((pay) => {
-    const matchSearch =
-      pay.id.toLowerCase().includes(paymentSearch.toLowerCase()) ||
-      pay.payerName.toLowerCase().includes(paymentSearch.toLowerCase());
-    const matchMethod = methodFilter === 'all' || pay.method === methodFilter;
-    return matchSearch && matchMethod;
-  });
-
-  // Refund Action Confirm
-  const handleExecuteRefund = () => {
+  async function handleExecuteRefund() {
     if (!activeRefundAction) return;
-
     const { type, refund } = activeRefundAction;
-    let successMsg = '';
-
-    setRefundRequests((prev) =>
-      prev.map((r) => {
-        if (r.id === refund.id) {
-          const nextStatus = type === 'approve' ? 'approved' : 'rejected';
-          successMsg = `Refund request ${refund.id} of ${refund.amount} has been ${nextStatus}`;
-          return { ...r, status: nextStatus };
-        }
-        return r;
-      })
-    );
-
-    success(successMsg);
     setActiveRefundAction(null);
-  };
+
+    const ok = await run((token) =>
+      transitionReturn(
+        token,
+        refund.id,
+        type === 'approve' ? 'approved' : 'rejected',
+        type === 'approve' ? 'Refund approved from the payments console.' : 'Refund declined after review.',
+        type === 'approve'
+      ));
+
+    if (ok) {
+      success(type === 'approve' ? 'Refund approved.' : 'Refund rejected.');
+      refunds.reload();
+    } else {
+      toastError('That refund decision could not be saved.');
+    }
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader title="Payments & Finance Logs" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Payments' }]} />
+      <PageHeader title="Payments and Refunds" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Payments' }]} />
 
-      {/* Revenue StatCards overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total Platform Gross" value={totalRevenue} icon={DollarSign} />
-        <StatCard title="SSLCommerz Gross Gateway" value={sslGross} icon={CreditCard} />
-        <StatCard title="Cash on Delivery Total" value={codGross} icon={ShieldCheck} />
-        <StatCard title="Transaction Success Rate" value={successPcts} icon={TrendingUp} />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="Captured" value={formatMinor(totals.total, totals.currency)} icon={DollarSign} />
+        <StatCard title="Online gateways" value={formatMinor(totals.online, totals.currency)} icon={CreditCard} />
+        <StatCard title="Cash on delivery" value={formatMinor(totals.cod, totals.currency)} icon={ShieldCheck} />
+        <StatCard
+          title="Capture rate"
+          value={totals.successRate == null ? '—' : `${totals.successRate.toFixed(1)}%`}
+          icon={TrendingUp}
+        />
       </div>
 
-      {/* Grid: CSS Bar Chart (left) and Refund requests list (right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* CSS Chart: Collection methods per month comparison */}
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm lg:col-span-1 flex flex-col space-y-4">
-          <h3 className="text-sm font-bold text-foreground tracking-wide">Monthly Collection Gateways</h3>
-          
-          <div className="h-48 flex items-end justify-between gap-4 border-b border-border/80 pb-2 px-2">
-            {[
-              { label: 'Apr', ssl: '65%', cod: '35%' },
-              { label: 'May', ssl: '75%', cod: '25%' },
-              { label: 'Jun', ssl: '80%', cod: '20%' },
-              { label: 'Jul', ssl: '85%', cod: '15%' }
-            ].map((col, idx) => (
-              <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
-                <div className="w-6 flex flex-col justify-end h-full gap-0.5 rounded overflow-hidden">
-                  <div className="bg-secondary w-full animate-in slide-in-from-bottom duration-300" style={{ height: col.cod }} title={`COD ${col.cod}`} />
-                  <div className="bg-primary w-full animate-in slide-in-from-bottom duration-300" style={{ height: col.ssl }} title={`SSLCommerz ${col.ssl}`} />
-                </div>
-                <span className="text-[10px] text-muted-foreground font-semibold">{col.label}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex gap-4 text-xs font-semibold justify-center">
-            <span className="flex items-center gap-1 text-primary">
-              <span className="w-2.5 h-2.5 rounded bg-primary" /> SSLCommerz
-            </span>
-            <span className="flex items-center gap-1 text-secondary-foreground">
-              <span className="w-2.5 h-2.5 rounded bg-secondary" /> Cash on Delivery
-            </span>
-          </div>
-        </div>
-
-        {/* Refund requests */}
-        <div className="lg:col-span-2 space-y-3">
-          <h3 className="text-base font-bold text-foreground px-1">Customer Refund Requests</h3>
-          <DataTable columns={refundColumns} data={refundRequests} />
-        </div>
-
-      </div>
-
-      {/* Payment history list */}
       <div className="space-y-3">
-        <h3 className="text-base font-bold text-foreground px-1">Payment Transactions History</h3>
-        
+        <h3 className="text-base font-bold text-foreground px-1">Refund requests awaiting a decision</h3>
+        <DataTable
+          columns={refundColumns}
+          data={refunds.data?.items ?? []}
+          isLoading={refunds.loading || busy}
+          error={refunds.error}
+          onRetry={refunds.reload}
+        />
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-base font-bold text-foreground px-1">Payment transactions</h3>
         <DataTable
           columns={paymentColumns}
-          data={filteredPayments}
-          searchPlaceholder="Search Transaction ID, payer..."
+          data={rows}
+          isLoading={payments.loading}
+          error={payments.error}
+          onRetry={payments.reload}
+          searchPlaceholder="Search order number, reference or party..."
           searchValue={paymentSearch}
           onSearchChange={setPaymentSearch}
           filterSlot={
             <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground font-semibold">Gateway:</span>
+              <span className="text-xs text-muted-foreground font-semibold">Method:</span>
               <select
                 value={methodFilter}
                 onChange={(e) => setMethodFilter(e.target.value)}
                 className="px-3 py-1.5 text-xs border border-border bg-card text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
-                <option value="all">All Gateways</option>
-                <option value="SSLCommerz">SSLCommerz</option>
-                <option value="Cash on Delivery">Cash on Delivery</option>
-                <option value="bKash">bKash</option>
+                {GATEWAYS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
               </select>
             </div>
           }
         />
       </div>
 
-      {/* Refund Approve/Reject Dialog */}
       <ConfirmDialog
-        isOpen={activeRefundAction !== null}
-        title={activeRefundAction?.type === 'approve' ? 'Approve Refund Request' : 'Reject Refund Request'}
+        isOpen={activeRefundAction != null}
+        title={activeRefundAction?.type === 'approve' ? 'Approve this refund?' : 'Reject this refund?'}
         description={
-          activeRefundAction?.type === 'approve'
-            ? `Are you sure you want to approve the refund of ${activeRefundAction?.refund.amount} to ${activeRefundAction?.refund.customerName}? The amount will be credited back via payment method.`
-            : `Are you sure you want to reject the refund of ${activeRefundAction?.refund.amount} to ${activeRefundAction?.refund.customerName}?`
+          activeRefundAction
+            ? activeRefundAction.type === 'approve'
+              ? `${formatMinor(activeRefundAction.refund.amountMinor)} goes back to the buyer through the original payment method, and the platform reverses its commission on that value.`
+              : `The buyer is told the return was declined. They can still raise a dispute.`
+            : ''
         }
-        confirmText="Confirm Action"
+        confirmText="Confirm"
         variant={activeRefundAction?.type === 'approve' ? 'primary' : 'danger'}
         onConfirm={handleExecuteRefund}
         onCancel={() => setActiveRefundAction(null)}

@@ -1,40 +1,29 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Lock, Mail, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/shared/Toast';
+import { useSuperAdminSession } from '@/features/auth/SuperAdminSession';
 
 export default function Login() {
   const navigate = useNavigate();
   const { success, error } = useToast();
+  const { login } = useSuperAdminSession();
 
-  // Form states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Errors states
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  // Email format validator
-  const validateEmail = (val: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!val) {
-      return 'Email address is required';
-    } else if (!emailRegex.test(val)) {
-      return 'Please enter a valid email address';
-    }
-    return '';
-  };
+  const validateEmail = (val: string) => val.trim() ? '' : 'Email address or mobile number is required';
 
-  // Password validator
   const validatePassword = (val: string) => {
     if (!val) {
       return 'Password is required';
-    } else if (val.length < 6) {
-      return 'Password must be at least 6 characters long';
+    } else if (val.length < 8) {
+      return 'Password must be at least 8 characters long';
     }
     return '';
   };
@@ -55,26 +44,29 @@ export default function Login() {
 
     setIsLoading(true);
 
-    // Simulate Auth API Request
-    setTimeout(() => {
+    try {
+      await login(email, password);
       setIsLoading(false);
-      success('Logged in successfully as Admin');
+      success('Signed in to the SuperAdmin console');
       navigate('/dashboard');
-    }, 1200);
+    } catch (err) {
+      setIsLoading(false);
+      error(err instanceof Error ? err.message : 'Unable to sign in.');
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col space-y-1 text-center">
         <h1 className="text-xl font-bold tracking-tight text-foreground">Welcome back</h1>
-        <p className="text-sm text-muted-foreground">Sign in to your AgroMED administrative dashboard</p>
+        <p className="text-sm text-muted-foreground">Sign in to your AgroMedConnect administrative dashboard</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Email Field */}
+        { }
         <div className="space-y-1.5">
           <label htmlFor="email" className="text-xs font-semibold text-foreground/80">
-            Email Address
+            Email address or mobile number
           </label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground/80" />
@@ -86,7 +78,7 @@ export default function Login() {
                 setEmail(e.target.value);
                 if (emailError) setEmailError('');
               }}
-              placeholder="admin@agromed.com"
+              placeholder="superadmin@agromed.com"
               disabled={isLoading}
               className={`w-full pl-10 pr-4 py-2.5 text-sm border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow ${
                 emailError
@@ -98,19 +90,11 @@ export default function Login() {
           {emailError && <p className="text-xs font-medium text-destructive">{emailError}</p>}
         </div>
 
-        {/* Password Field */}
+        { }
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label htmlFor="password" className="text-xs font-semibold text-foreground/80">
-              Password
-            </label>
-            <Link
-              to="/auth/forgot-password"
-              className="text-xs font-semibold text-info hover:text-info/90 hover:underline"
-            >
-              Forgot password?
-            </Link>
-          </div>
+          <label htmlFor="password" className="text-xs font-semibold text-foreground/80">
+            Password
+          </label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground/80" />
             <input
@@ -141,22 +125,7 @@ export default function Login() {
           {passwordError && <p className="text-xs font-medium text-destructive">{passwordError}</p>}
         </div>
 
-        {/* Remember Me Box */}
-        <div className="flex items-center">
-          <input
-            id="remember-me"
-            type="checkbox"
-            checked={rememberMe}
-            onChange={(e) => setRememberMe(e.target.checked)}
-            disabled={isLoading}
-            className="h-4 w-4 rounded border-border text-primary focus:ring-primary bg-background cursor-pointer"
-          />
-          <label htmlFor="remember-me" className="ml-2 block text-xs font-semibold text-muted-foreground cursor-pointer select-none">
-            Remember my session
-          </label>
-        </div>
-
-        {/* Submit button */}
+        { }
         <button
           type="submit"
           disabled={isLoading}

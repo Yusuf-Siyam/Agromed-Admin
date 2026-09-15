@@ -1,30 +1,37 @@
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Package, DollarSign, Archive, Edit } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Archive, ArrowLeft, DollarSign, Package } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
+import StatCard from '@/components/shared/StatCard';
 import StatusBadge from '@/components/shared/StatusBadge';
-import { mockProducts } from '@/mock-data/products';
-import { EmptyState } from '@/components/shared/States';
+import ListingDossier from '@/components/shared/ListingDossier';
+import { EmptyState, ErrorState, LoadingState } from '@/components/shared/States';
+import { useApi } from '@/lib/useApi';
+import { formatDate, formatMinor, listListings, listReviews } from '@/lib/superadmin-api';
 
 export default function ProductDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const product = mockProducts.find((p) => p.id === id);
+  const listings = useApi((token) => listListings(token, { limit: 100 }), []);
+  const reviews = useApi((token) => listReviews(token, { limit: 100 }), []);
+
+  const product = listings.data?.items.find((p) => p.id === id);
+  const productReviews = (reviews.data?.items ?? []).filter((r) => r.listingId === id);
+
+  if (listings.loading) return <LoadingState message="Loading listing…" />;
+  if (listings.error) return <ErrorState message={listings.error} onRetry={listings.reload} />;
 
   if (!product) {
     return (
       <div className="space-y-6">
         <PageHeader title="Product Not Found" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Products', href: '/products' }, { label: 'Error' }]} />
         <EmptyState
-          title="Product not found"
-          description="The product SKU you requested does not exist or may have been deleted."
+          title="Listing not found"
+          description="That listing does not exist, or it is outside the most recent hundred."
           action={
-            <Link
-              to="/products"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg"
-            >
+            <Link to="/products" className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
               <ArrowLeft className="h-4 w-4" />
-              Back to Catalog
+              Back to catalogue
             </Link>
           }
         />
@@ -32,111 +39,82 @@ export default function ProductDetails() {
     );
   }
 
+  const average = productReviews.length === 0
+    ? null
+    : productReviews.reduce((t, r) => t + r.rating, 0) / productReviews.length;
+
   return (
     <div className="space-y-6">
-      {/* Back button */}
       <div className="space-y-2">
         <button
           onClick={() => navigate('/products')}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+          className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to inventory
+          Back to catalogue
         </button>
         <PageHeader
-          title={product.name}
-          breadcrumbs={[
-            { label: 'Home', href: '/' },
-            { label: 'Products', href: '/products' },
-            { label: product.name }
-          ]}
-          action={
-            <button
-              onClick={() => navigate(`/products/${product.id}/edit`)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
-            >
-              <Edit className="h-4 w-4" />
-              Edit Product
-            </button>
-          }
+          title={product.nameEn ?? product.sku}
+          breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Products', href: '/products' }, { label: product.sku }]}
+          action={<StatusBadge status={product.status} />}
         />
       </div>
 
-      {/* Grid: Details card & Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Side Details card */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-primary/10 text-primary rounded-xl border border-primary/20">
-                <Package className="h-7 w-7" />
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-foreground">{product.name}</h3>
-                <span className="text-xs text-muted-foreground font-mono">{product.sku}</span>
-              </div>
-            </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="From price" value={product.fromPriceMinor == null ? 'Quote only' : formatMinor(product.fromPriceMinor)} icon={DollarSign} />
+        <StatCard title="Stock on hand" value={Number(product.stockOnHand).toLocaleString()} icon={Archive} />
+        <StatCard title="Reviews" value={productReviews.length} icon={Package} />
+        <StatCard title="Rating" value={average == null ? '—' : `★ ${average.toFixed(1)}`} icon={Package} />
+      </div>
 
-            <div className="border-t border-border/60 my-2" />
+      <ListingDossier listingId={product.id} />
 
-            <div className="space-y-2">
-              <h4 className="text-xs font-bold text-foreground tracking-wider uppercase">Product Specifications</h4>
-              <p className="text-sm text-foreground/80 leading-relaxed font-medium">
-                {product.description}
-              </p>
-            </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm lg:col-span-1">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Listing</h3>
+          <dl className="space-y-2.5 text-sm">
+            <div className="flex justify-between"><dt className="text-muted-foreground">SKU</dt><dd className="text-foreground">{product.sku}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Brand</dt><dd className="text-foreground">{product.brand ?? '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Kind</dt><dd className="capitalize text-foreground">{product.kind}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Category</dt><dd className="text-foreground">{product.categoryCode}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Seller</dt><dd className="text-foreground">{product.sellerName}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Listed</dt><dd className="text-foreground">{formatDate(product.createdAt)}</dd></div>
+          </dl>
+          <div className="space-y-1 border-t border-border pt-3">
+            <p className="text-xs font-semibold text-muted-foreground">Name (English)</p>
+            <p className="text-sm text-foreground">{product.nameEn ?? '—'}</p>
+            <p className="pt-2 text-xs font-semibold text-muted-foreground">নাম (বাংলা)</p>
+            <p className="text-sm text-foreground">{product.nameBn ?? '—'}</p>
           </div>
         </div>
 
-        {/* Right side stats widgets */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <h4 className="text-xs font-bold text-foreground tracking-wider uppercase">Inventory Metrics</h4>
-            
-            <div className="space-y-3.5 text-sm font-semibold">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Catalog status:</span>
-                <StatusBadge status={product.status} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Supplier Company:</span>
-                <span className="text-xs">{product.companyName}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Product Category:</span>
-                <span className="text-xs font-bold">{product.category}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Price rate:</span>
-                <span className="text-xs font-bold flex items-center text-info">
-                  <DollarSign className="h-3.5 w-3.5" />
-                  {product.price.toFixed(2)} / unit
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Stock Level:</span>
-                <span className="text-xs font-bold flex items-center gap-1">
-                  <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-                  {product.stock === 0 ? (
-                    <span className="text-destructive font-bold">Out of Stock</span>
-                  ) : (
-                    <span>{product.stock} units available</span>
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Low Stock Trigger:</span>
-                <span className="text-xs font-mono">{product.lowStockLimit} units</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground text-xs">Registered Date:</span>
-                <span className="text-xs">{product.registeredDate}</span>
-              </div>
-            </div>
-          </div>
+        <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm lg:col-span-2">
+          <h3 className="border-b border-border px-5 py-4 text-xs font-bold uppercase tracking-wider text-foreground">
+            Reviews ({productReviews.length})
+          </h3>
+          {reviews.loading ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">Loading reviews…</p>
+          ) : productReviews.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">No reviews for this listing yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {productReviews.map((r) => (
+                <li key={r.id} className="space-y-1 px-5 py-4">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-foreground">★ {r.rating}</span>
+                    <StatusBadge status={r.status} />
+                  </div>
+                  <p className="text-sm text-foreground">{r.body ?? <em className="text-muted-foreground">Rating only</em>}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {r.authorName ?? 'Anonymous'}
+                    {r.isVerifiedPurchase ? ' · verified purchase' : ''}
+                    {' · '}{formatDate(r.createdAt)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-
       </div>
     </div>
   );

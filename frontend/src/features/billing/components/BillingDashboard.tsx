@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { ArrowRightLeft, Banknote, Calculator, Check, PlayCircle, RefreshCw, Send } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
@@ -6,182 +7,106 @@ import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
 import StatusBadge from '@/components/shared/StatusBadge';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useToast } from '@/components/shared/Toast';
-import { ArrowRightLeft, Check, RefreshCw } from 'lucide-react';
+import { useApi, useApiAction } from '@/lib/useApi';
+import {
+  approvePayout, approveSettlement, calculateSettlement, createSettlementRun,
+  executeSettlement, formatDate, formatMinor, getSettlementStatement, initiatePayout,
+  listPayouts, listSettlements, settlePayout
+} from '@/lib/superadmin-api';
+import type { AdminPayout, SettlementRun, SettlementStatementLine } from '@/lib/superadmin-api';
+import { cn } from '@/lib/utils';
 
-interface CompanySettlement {
-  id: string;
-  companyName: string;
-  grossSales: number;
-  discount: number;
-  commission: number;
-  tax: number;
-  gatewayFee: number;
-  settlementAmount: number;
-  status: 'paid' | 'pending' | 'processing';
-  date: string;
-}
+type RunAction = 'calculate' | 'approve' | 'execute';
+type PayoutAction = 'approve' | 'initiate' | 'paid';
 
 export default function BillingDashboard() {
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
+  const { run: perform, busy } = useApiAction();
 
-  // Mock Company Settlements dataset (calculating balances)
-  const [settlements, setSettlements] = useState<CompanySettlement[]>([
-    {
-      id: 'SET-901',
-      companyName: 'Bayer CropScience BD',
-      grossSales: 620000,
-      discount: 9300, // 1.5%
-      commission: 62000, // 10%
-      tax: 31000, // 5%
-      gatewayFee: 12400, // 2%
-      settlementAmount: 505300, // gross - discount - commission - tax - gateway
-      status: 'pending',
-      date: '2026-08-11'
-    },
-    {
-      id: 'SET-902',
-      companyName: 'Greenfield Agro Ltd.',
-      grossSales: 420000,
-      discount: 6300,
-      commission: 33600, // 8% override
-      tax: 21000,
-      gatewayFee: 8400,
-      settlementAmount: 350700,
-      status: 'paid',
-      date: '2026-08-10'
-    },
-    {
-      id: 'SET-903',
-      companyName: 'Acme Agritech Solutions',
-      grossSales: 260000,
-      discount: 3900,
-      commission: 26000, // 10%
-      tax: 13000,
-      gatewayFee: 5200,
-      settlementAmount: 211900,
-      status: 'processing',
-      date: '2026-08-11'
-    },
-    {
-      id: 'SET-904',
-      companyName: 'Sufala Fertilizer Co.',
-      grossSales: 110000,
-      discount: 1650,
-      commission: 11000, // 10%
-      tax: 5500,
-      gatewayFee: 2200,
-      settlementAmount: 89650,
-      status: 'paid',
-      date: '2026-08-08'
-    }
-  ]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runAction, setRunAction] = useState<{ type: RunAction; runId: string } | null>(null);
+  const [payoutAction, setPayoutAction] = useState<{ type: PayoutAction; payout: AdminPayout } | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  // Dialog active action state
-  const [activeAction, setActiveAction] = useState<{
-    type: 'mark_paid' | 'mark_pending';
-    settlement: CompanySettlement;
-  } | null>(null);
+  const runs = useApi((token) => listSettlements(token, { limit: 50 }), []);
+  const payouts = useApi((token) => listPayouts(token, { limit: 100 }), []);
 
-  // Search filter
-  const [search, setSearch] = useState('');
-
-  const filteredSettlements = settlements.filter((item) =>
-    item.companyName.toLowerCase().includes(search.toLowerCase()) ||
-    item.id.toLowerCase().includes(search.toLowerCase())
+  const activeRunId = selectedRunId ?? runs.data?.items[0]?.id ?? null;
+  const statement = useApi(
+    (token) => activeRunId ? getSettlementStatement(token, activeRunId) : Promise.resolve([]),
+    [activeRunId]
   );
 
-  const handleExecuteSettlement = () => {
-    if (!activeAction) return;
+  const totals = useMemo(() => {
+    const items = payouts.data?.items ?? [];
+    const by = (s: string) => items.filter((p) => p.status === s).reduce((t, p) => t + p.amountMinor, 0);
+    return {
+      currency: items[0]?.currency ?? 'BDT',
+      awaiting: by('pending'),
+      approved: by('approved') + by('processing'),
+      paid: by('paid'),
+      failed: by('failed')
+    };
+  }, [payouts.data]);
 
-    const { type, settlement } = activeAction;
-    const nextStatus = type === 'mark_paid' ? 'paid' : 'pending';
-
-    setSettlements((prev) =>
-      prev.map((s) => {
-        if (s.id === settlement.id) {
-          return { ...s, status: nextStatus };
-        }
-        return s;
-      })
-    );
-
-    success(`Settlement ID ${settlement.id} successfully updated to ${nextStatus.toUpperCase()}`);
-    setActiveAction(null);
-  };
-
-  const columns: Column<CompanySettlement>[] = [
-    { key: 'id', label: 'ID', sortable: true },
+  const runColumns: Column<SettlementRun>[] = [
     {
-      key: 'companyName',
-      label: 'Agro Company',
-      render: (row) => <span className="font-bold">{row.companyName}</span>
-    },
-    {
-      key: 'grossSales',
-      label: 'Gross (GMV)',
-      align: 'right',
-      render: (row) => `$${row.grossSales.toLocaleString()}`
-    },
-    {
-      key: 'discount',
-      label: 'Discount',
-      align: 'right',
-      render: (row) => `-$${row.discount.toLocaleString()}`
-    },
-    {
-      key: 'commission',
-      label: 'Commission',
-      align: 'right',
-      render: (row) => `-$${row.commission.toLocaleString()}`
-    },
-    {
-      key: 'tax',
-      label: 'Tax (5%)',
-      align: 'right',
-      render: (row) => `-$${row.tax.toLocaleString()}`
-    },
-    {
-      key: 'gatewayFee',
-      label: 'Gateway (2%)',
-      align: 'right',
-      render: (row) => `-$${row.gatewayFee.toLocaleString()}`
-    },
-    {
-      key: 'settlementAmount',
-      label: 'Payout Net Owed',
-      align: 'right',
+      key: 'runReference',
+      label: 'Run',
       render: (row) => (
-        <span className="font-mono font-bold text-info">
-          ${row.settlementAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-        </span>
+        <button
+          onClick={() => setSelectedRunId(row.id)}
+          className={cn('cursor-pointer text-left font-semibold', row.id === activeRunId ? 'text-primary' : 'text-foreground hover:text-primary')}
+        >
+          {row.runReference}
+        </button>
       )
     },
     {
-      key: 'status',
-      label: 'Status',
-      render: (row) => <StatusBadge status={row.status} />
+      key: 'period',
+      label: 'Period',
+      render: (row) => `${formatDate(row.periodStart)} – ${formatDate(row.periodEnd)}`
     },
+    { key: 'totalGrossMinor', label: 'Gross', align: 'right', render: (row) => formatMinor(row.totalGrossMinor, row.currency) },
+    { key: 'totalCommissionMinor', label: 'Commission', align: 'right', render: (row) => formatMinor(row.totalCommissionMinor, row.currency) },
+    {
+      key: 'totalPayableMinor',
+      label: 'Payable',
+      align: 'right',
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.totalPayableMinor, row.currency)}</span>
+    },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
     {
       key: 'actions',
-      label: 'Update Payout',
+      label: 'Actions',
       align: 'right',
       render: (row) => (
-        <div className="flex justify-end gap-1.5">
-          {row.status !== 'paid' ? (
+        <div className="flex items-center justify-end gap-1">
+          {(row.status === 'draft' || row.status === 'calculated') && (
             <button
-              onClick={() => setActiveAction({ type: 'mark_paid', settlement: row })}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-info/10 text-info border border-info/20 hover:bg-info hover:text-white rounded-lg transition-colors cursor-pointer font-bold"
+              onClick={() => setRunAction({ type: 'calculate', runId: row.id })}
+              className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-lg transition-colors cursor-pointer"
+              title="Calculate"
             >
-              <Check className="h-3.5 w-3.5" />
-              Mark Paid
+              <Calculator className="h-4 w-4" />
             </button>
-          ) : (
+          )}
+          {row.status === 'calculated' && (
             <button
-              onClick={() => setActiveAction({ type: 'mark_pending', settlement: row })}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-muted border border-border hover:bg-secondary hover:text-white rounded-lg transition-colors cursor-pointer font-bold"
+              onClick={() => setRunAction({ type: 'approve', runId: row.id })}
+              className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+              title="Approve"
             >
-              <RefreshCw className="h-3.5 w-3.5 text-secondary-foreground" />
-              Re-pending
+              <Check className="h-4 w-4" />
+            </button>
+          )}
+          {row.status === 'approved' && (
+            <button
+              onClick={() => setRunAction({ type: 'execute', runId: row.id })}
+              className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+              title="Execute — creates the payouts"
+            >
+              <PlayCircle className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -189,56 +114,255 @@ export default function BillingDashboard() {
     }
   ];
 
+  const statementColumns: Column<SettlementStatementLine>[] = [
+    { key: 'organisationName', label: 'Company', render: (row) => <span className="font-semibold text-foreground">{row.organisationName}</span> },
+    { key: 'orderCount', label: 'Orders', align: 'center' },
+    { key: 'grossMinor', label: 'Gross', align: 'right', render: (row) => formatMinor(row.grossMinor, row.currency) },
+    { key: 'commissionMinor', label: 'Commission', align: 'right', render: (row) => `−${formatMinor(row.commissionMinor, row.currency)}` },
+    { key: 'platformSubsidyMinor', label: 'Platform subsidy', align: 'right', render: (row) => `+${formatMinor(row.platformSubsidyMinor, row.currency)}` },
+    { key: 'refundMinor', label: 'Refunds', align: 'right', render: (row) => `−${formatMinor(row.refundMinor, row.currency)}` },
+    {
+      key: 'netPayableMinor',
+      label: 'Net payable',
+      align: 'right',
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.netPayableMinor, row.currency)}</span>
+    }
+  ];
+
+  const payoutColumns: Column<AdminPayout>[] = [
+    { key: 'organisationName', label: 'Company', render: (row) => <span className="font-semibold text-foreground">{row.organisationName}</span> },
+    {
+      key: 'destinationName',
+      label: 'Destination',
+      render: (row) => (
+        <div className="flex flex-col">
+          <span className="text-foreground">{row.destinationName ?? 'Not chosen'}</span>
+          <span className="text-xs text-muted-foreground">{row.providerReference ?? row.method}</span>
+        </div>
+      )
+    },
+    {
+      key: 'amountMinor',
+      label: 'Amount',
+      align: 'right',
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.amountMinor, row.currency)}</span>
+    },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> },
+    {
+      key: 'actions',
+      label: 'Actions',
+      align: 'right',
+      render: (row) => (
+        <div className="flex items-center justify-end gap-1">
+          {row.status === 'pending' && (
+            <button
+              onClick={() => setPayoutAction({ type: 'approve', payout: row })}
+              className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+              title="Approve"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+          )}
+          {row.status === 'approved' && (
+            <button
+              onClick={() => setPayoutAction({ type: 'initiate', payout: row })}
+              className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+              title="Send to the provider"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          )}
+          {row.status === 'processing' && (
+            <button
+              onClick={() => setPayoutAction({ type: 'paid', payout: row })}
+              className="p-1.5 hover:bg-info/10 text-info rounded-lg transition-colors cursor-pointer"
+              title="Mark as paid"
+            >
+              <Banknote className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )
+    }
+  ];
+
+  async function openRun() {
+
+    const end = new Date();
+    end.setUTCHours(0, 0, 0, 0);
+    end.setUTCDate(1);
+    const start = new Date(end);
+    start.setUTCMonth(start.getUTCMonth() - 1);
+    setCreating(false);
+
+    const ok = await perform((token) =>
+      createSettlementRun(token, start.toISOString(), end.toISOString(), 'BDT'));
+    if (ok) {
+      success('Settlement run opened.');
+      runs.reload();
+    } else {
+      toastError('That period may already be covered by another run.');
+    }
+  }
+
+  async function executeRunAction() {
+    if (!runAction) return;
+    const { type, runId } = runAction;
+    setRunAction(null);
+
+    const ok = await perform((token) =>
+      type === 'calculate' ? calculateSettlement(token, runId)
+      : type === 'approve' ? approveSettlement(token, runId)
+      : executeSettlement(token, runId));
+
+    if (ok) {
+      success(type === 'execute' ? 'Run executed — payouts created.' : `Run ${type}d.`);
+      runs.reload();
+      statement.reload();
+      payouts.reload();
+    } else {
+      toastError('That step could not be completed.');
+    }
+  }
+
+  async function executePayoutAction() {
+    if (!payoutAction) return;
+    const { type, payout } = payoutAction;
+    setPayoutAction(null);
+
+    const reference = `PAYOUT-${payout.id.slice(0, 8).toUpperCase()}`;
+    const ok = await perform((token) =>
+      type === 'approve' ? approvePayout(token, payout.id)
+      : type === 'initiate' ? initiatePayout(token, payout.id, undefined, reference)
+      : settlePayout(token, payout.id, 'paid', payout.providerReference ?? reference));
+
+    if (ok) {
+      success('Payout updated.');
+      payouts.reload();
+    } else {
+      toastError(
+        type === 'approve'
+          ? 'A payout cannot be approved by whoever requested it.'
+          : 'That payout could not be updated.');
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
-        title="Billing & settlements"
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Financial', href: '/billing' }, { label: 'Settlements' }]}
+        title="Billing and Settlement"
+        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Billing' }]}
         action={
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg shadow-sm">
-            <ArrowRightLeft className="h-4 w-4" />
-            Payout settlements queue
+          <div className="flex gap-2">
+            <button
+              onClick={() => { runs.reload(); payouts.reload(); statement.reload(); }}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold hover:bg-muted"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />Refresh
+            </button>
+            <button
+              onClick={() => setCreating(true)}
+              disabled={busy}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5" />Open a run
+            </button>
           </div>
         }
       />
 
-      {/* Section 1: Financial Dashboard summary grid */}
-      <div className="space-y-4">
-        <h3 className="text-xs font-bold text-foreground tracking-wide uppercase px-1">Consolidated platform accounting</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          <FinancialSummaryCard label="Total Billing (GMV)" amount={1248500.00} variant="info" />
-          <FinancialSummaryCard label="Pending Settlement" amount={296350.00} variant="warning" />
-          <FinancialSummaryCard label="Completed Settlement" amount={827300.00} variant="success" />
-          <FinancialSummaryCard label="Commission Collected" amount={76350.00} variant="success" />
-          <FinancialSummaryCard label="Commission Pending" amount={18500.00} variant="warning" />
-          <FinancialSummaryCard label="Platform Total Tax Cut (5%)" amount={62425.00} variant="default" />
-          <FinancialSummaryCard label="Gateway Processor Fees (2%)" amount={24970.00} variant="danger" />
-          <FinancialSummaryCard label="Net Platform Revenue" amount={69880.00} variant="success" />
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <FinancialSummaryCard label="Awaiting approval" amount={formatMinor(totals.awaiting, totals.currency)} variant="warning" />
+        <FinancialSummaryCard label="Approved or in flight" amount={formatMinor(totals.approved, totals.currency)} variant="info" />
+        <FinancialSummaryCard label="Paid" amount={formatMinor(totals.paid, totals.currency)} variant="success" />
+        <FinancialSummaryCard label="Failed" amount={formatMinor(totals.failed, totals.currency)} variant="danger" />
       </div>
 
-      {/* Section 2: Payout Settlements table */}
       <div className="space-y-3">
-        <h3 className="text-sm font-bold text-foreground px-1">Third-party company settlements ledger</h3>
+        <h3 className="px-1 text-base font-bold text-foreground">Settlement runs</h3>
         <DataTable
-          columns={columns}
-          data={filteredSettlements}
-          searchPlaceholder="Search payout entries by ID or company..."
-          searchValue={search}
-          onSearchChange={setSearch}
+          columns={runColumns}
+          data={runs.data?.items ?? []}
+          isLoading={runs.loading || busy}
+          error={runs.error}
+          onRetry={runs.reload}
         />
       </div>
 
-      {/* Settlement status confirmation dialog */}
+      <div className="space-y-3">
+        <h3 className="px-1 text-base font-bold text-foreground">
+          Statement {activeRunId ? `· ${runs.data?.items.find((r) => r.id === activeRunId)?.runReference ?? ''}` : ''}
+        </h3>
+        <DataTable
+          columns={statementColumns}
+          data={statement.data ?? []}
+          isLoading={statement.loading}
+          error={statement.error}
+          onRetry={statement.reload}
+        />
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="px-1 text-base font-bold text-foreground">Payouts</h3>
+        <DataTable
+          columns={payoutColumns}
+          data={payouts.data?.items ?? []}
+          isLoading={payouts.loading || busy}
+          error={payouts.error}
+          onRetry={payouts.reload}
+        />
+      </div>
+
       <ConfirmDialog
-        isOpen={activeAction !== null}
-        title={activeAction?.type === 'mark_paid' ? 'Mark Payout as Completed' : 'Mark Payout as Pending'}
-        description={`Are you sure you want to mark Settlement ID ${activeAction?.settlement.id} (${activeAction?.settlement.companyName}) as ${activeAction?.type === 'mark_paid' ? 'PAID' : 'PENDING'}? This adjusts the pending settlements queue balances.`}
+        isOpen={creating}
+        title="Open a settlement run for last month?"
+        description="The run is created as a draft. Nothing is calculated and no money moves until you choose to."
+        confirmText="Open run"
+        variant="primary"
+        onConfirm={openRun}
+        onCancel={() => setCreating(false)}
+      />
+
+      <ConfirmDialog
+        isOpen={runAction != null}
+        title={
+          runAction?.type === 'calculate' ? 'Calculate this run?'
+          : runAction?.type === 'approve' ? 'Approve this run?'
+          : 'Execute this run?'
+        }
+        description={
+          runAction?.type === 'calculate'
+            ? 'Every delivered order in the period that is not already settled is swept into this run. Safe to repeat while the run is unapproved.'
+            : runAction?.type === 'approve'
+              ? 'The totals are frozen. Recalculating afterwards is refused.'
+              : 'One pending payout is created per seller. Releasing each one is a separate, two-person act.'
+        }
         confirmText="Confirm"
-        variant={activeAction?.type === 'mark_paid' ? 'primary' : 'warning'}
-        onConfirm={handleExecuteSettlement}
-        onCancel={() => setActiveAction(null)}
+        variant={runAction?.type === 'execute' ? 'danger' : 'primary'}
+        onConfirm={executeRunAction}
+        onCancel={() => setRunAction(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={payoutAction != null}
+        title={
+          payoutAction?.type === 'approve' ? 'Approve this payout?'
+          : payoutAction?.type === 'initiate' ? 'Send this payout to the provider?'
+          : 'Mark this payout as paid?'
+        }
+        description={
+          payoutAction
+            ? payoutAction.type === 'approve'
+              ? `${formatMinor(payoutAction.payout.amountMinor, payoutAction.payout.currency)} to ${payoutAction.payout.organisationName}. Whoever requested the payout cannot be the one to approve it.`
+              : payoutAction.type === 'initiate'
+                ? `The money is handed to the provider against ${payoutAction.payout.organisationName}'s verified destination.`
+                : `Records that the provider settled ${formatMinor(payoutAction.payout.amountMinor, payoutAction.payout.currency)}.`
+            : ''
+        }
+        confirmText="Confirm"
+        variant={payoutAction?.type === 'approve' ? 'primary' : 'danger'}
+        onConfirm={executePayoutAction}
+        onCancel={() => setPayoutAction(null)}
       />
     </div>
   );

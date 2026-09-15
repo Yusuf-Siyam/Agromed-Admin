@@ -1,207 +1,395 @@
-import { useState } from 'react';
-import { Edit, Trash2, Plus, FolderPlus } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, ChevronRight, ArrowDown, ArrowUp, Archive, Eye, EyeOff, FolderTree, Languages, Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import { useToast } from '@/components/shared/Toast';
-import { mockCategories } from '@/mock-data/products';
-import type { CategoryItem } from '@/mock-data/products';
+import { useApi, useApiAction } from '@/lib/useApi';
+import ActionIcon from '@/components/shared/ActionIcon';
+import CategoryForm from './CategoryForm';
+import type { CategoryDraft } from './CategoryForm';
+import { createCategory, deleteCategory, listTaxonomy, updateCategory } from '@/lib/superadmin-api';
+import type { TaxonomyNode } from '@/lib/superadmin-api';
 
 export default function CategoryList() {
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
+  const { run, busy, error: writeError, clearError } = useApiAction();
 
-  const [categories, setCategories] = useState<CategoryItem[]>(mockCategories);
   const [search, setSearch] = useState('');
+  const [toggling, setToggling] = useState<TaxonomyNode | null>(null);
+  const [deleting, setDeleting] = useState<TaxonomyNode | null>(null);
+  const [form, setForm] = useState<{ editing: TaxonomyNode | null } | null>(null);
+  const [showRetired, setShowRetired] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [blocked, setBlocked] = useState<string | null>(null);
 
-  // Dialog management
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<CategoryItem | null>(null);
-  const [deleteCategory, setDeleteCategory] = useState<CategoryItem | null>(null);
+  const taxonomy = useApi((token) => listTaxonomy(token, showRetired), [showRetired]);
 
-  // Form states
-  const [catName, setCatName] = useState('');
-  const [catDesc, setCatDesc] = useState('');
+  const toggleCollapse = (id: string) => setCollapsed((prev) => {
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
 
-  const columns: Column<CategoryItem>[] = [
-    { key: 'id', label: 'Category ID' },
-    { key: 'name', label: 'Category Name', render: (row) => <span className="font-semibold text-foreground">{row.name}</span> },
-    { key: 'description', label: 'Description' },
-    { key: 'productCount', label: 'SKU Products Count', align: 'center' },
+  // Ordered depth-first by the tree, not alphabetically by path: siblings sort
+  // by display_order, which is the order buyers actually see. Searching flattens
+  // the tree, because a match three levels down should not be hidden behind a
+  // collapsed ancestor.
+  const rows = useMemo(() => {
+    const all = taxonomy.data ?? [];
+    const needle = search.trim().toLowerCase();
+
+    if (needle) {
+      return all
+        .filter((c) => c.code.toLowerCase().includes(needle)
+          || (c.nameEn ?? '').toLowerCase().includes(needle)
+          || (c.nameBn ?? '').includes(search.trim()))
+        .sort((a, b) => a.path.localeCompare(b.path));
+    }
+
+    const byParent = new Map<string, TaxonomyNode[]>();
+    for (const c of all) {
+      const key = c.parentId ?? '#root';
+      const list = byParent.get(key);
+      if (list) list.push(c); else byParent.set(key, [c]);
+    }
+    for (const list of byParent.values()) {
+      list.sort((a, b) => a.displayOrder - b.displayOrder || a.code.localeCompare(b.code));
+    }
+
+    const out: TaxonomyNode[] = [];
+    const walk = (parentKey: string) => {
+      for (const node of byParent.get(parentKey) ?? []) {
+        out.push(node);
+        if (!collapsed.has(node.id)) walk(node.id);
+      }
+    };
+    walk('#root');
+    return out;
+  }, [taxonomy.data, search, collapsed]);
+
+  /** Siblings of a node in display order — what a reorder swaps within. */
+  const siblingsOf = (row: TaxonomyNode) =>
+    (taxonomy.data ?? [])
+      .filter((c) => c.parentId === row.parentId && !c.isRetired)
+      .sort((a, b) => a.displayOrder - b.displayOrder || a.code.localeCompare(b.code));
+
+  /**
+   * Move a category past its neighbour by swapping the two display_order values.
+   * Two writes rather than a renumber of the whole level: only the pair actually
+   * changes, so a concurrent edit elsewhere in the tree is not clobbered.
+   */
+  async function reorder(row: TaxonomyNode, direction: -1 | 1) {
+    const sibs = siblingsOf(row);
+    const i = sibs.findIndex((c) => c.id === row.id);
+    const swap = sibs[i + direction];
+    if (!swap) return;
+
+    const ok = await run(async (token) => {
+      await updateCategory(token, row.id, swap.displayOrder, row.isActive);
+      await updateCategory(token, swap.id, row.displayOrder, swap.isActive);
+    });
+    if (ok) taxonomy.reload();
+    else toastError(`${row.code} could not be moved.`);
+  }
+
+  /**
+   * Why this category cannot be removed, or null if it can.
+   *
+   * usp_superadmin_delete_category refuses on either count and says so; this
+   * repeats the rule client-side so the answer is on the button rather than
+   * behind a failed request, and names the number the admin has to deal with.
+   */
+  function deleteBlockReason(row: TaxonomyNode): string | null {
+    if (row.listingCount > 0) {
+      return `${row.listingCount} active listing${row.listingCount === 1 ? '' : 's'} `
+        + 'still use this category. Move or withdraw them first.';
+    }
+    if (row.childCount > 0) {
+      return `${row.childCount} sub-categor${row.childCount === 1 ? 'y' : 'ies'} `
+        + 'sit under this one. Remove them first.';
+    }
+    return null;
+  }
+
+  const columns: Column<TaxonomyNode>[] = [
+    {
+      key: 'code',
+      label: 'Category',
+      render: (row) => {
+        const hasChildren = row.childCount > 0;
+        return (
+          <div className="flex items-start gap-1.5" style={{ paddingLeft: `${row.depth * 18}px` }}>
+            {hasChildren ? (
+              <button
+                type="button"
+                aria-label={collapsed.has(row.id) ? `Expand ${row.code}` : `Collapse ${row.code}`}
+                aria-expanded={!collapsed.has(row.id)}
+                onClick={() => toggleCollapse(row.id)}
+                className="mt-0.5 cursor-pointer rounded p-0.5 hover:bg-muted"
+              >
+                {collapsed.has(row.id)
+                  ? <ChevronRight className="h-3.5 w-3.5" />
+                  : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            ) : <span className="w-[18px]" aria-hidden />}
+            <div className="flex flex-col">
+              <span className="flex items-center gap-1.5 font-semibold text-foreground">
+                {row.nameEn ?? row.code}
+                {row.isRetired && (
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    Retired
+                  </span>
+                )}
+                {row.icon && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {row.icon}
+                  </span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                L{row.depth + 1} · {row.code}
+              </span>
+              {row.nameBn && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {row.nameBn}
+                  {!row.nameBnReviewed && (
+                    <span className="rounded bg-warning/15 px-1 text-[10px] font-semibold text-warning">
+                      unreviewed
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      }
+    },
+    { key: 'listingKind', label: 'Kind', align: 'center' },
+    { key: 'displayOrder', label: 'Order', align: 'center' },
+    { key: 'listingCount', label: 'Listings', align: 'center' },
+    {
+      key: 'compliance',
+      label: 'Compliance requirements',
+      render: (row) => {
+        const flags = [
+          row.requiresSellerCertificate && 'Seller certificate',
+          row.requiresProductCertificate && 'Product certificate',
+          row.requiresBuyerLicence && 'Buyer licence',
+          row.requiresBatchTracking && 'Batch tracking',
+          row.requiresExpiryTracking && 'Expiry tracking'
+        ].filter(Boolean) as string[];
+
+        if (flags.length === 0) return <span className="text-xs text-muted-foreground">None</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {flags.map((f) => (
+              <span key={f} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                <ShieldCheck className="h-3 w-3" />{f}
+              </span>
+            ))}
+          </div>
+        );
+      }
+    },
+    {
+      key: 'isActive',
+      label: 'Visible',
+      align: 'center',
+      render: (row) => (
+        <span className={row.isActive ? 'text-xs font-semibold text-success' : 'text-xs font-semibold text-muted-foreground'}>
+          {row.isActive ? 'Live' : 'Hidden'}
+        </span>
+      )
+    },
     {
       key: 'actions',
       label: 'Actions',
       align: 'right',
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => handleOpenEdit(row)}
-            className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-lg transition-colors cursor-pointer"
-            title="Edit Category"
-          >
-            <Edit className="h-4.5 w-4.5" />
-          </button>
-          <button
-            onClick={() => setDeleteCategory(row)}
-            className="p-1.5 hover:bg-destructive/10 text-destructive hover:text-destructive rounded-lg transition-colors cursor-pointer"
-            title="Delete Category"
-          >
-            <Trash2 className="h-4.5 w-4.5" />
-          </button>
+          <ActionIcon
+            label="Edit name and order"
+            icon={Pencil}
+            onClick={() => setForm({ editing: row })}
+          />
+          <ActionIcon
+            label={row.isActive ? 'Hide from the catalogue' : 'Show in the catalogue'}
+            icon={row.isActive ? EyeOff : Eye}
+            onClick={() => setToggling(row)}
+          />
+          <ActionIcon
+            label="Move up"
+            icon={ArrowUp}
+            disabled={row.isRetired || siblingsOf(row)[0]?.id === row.id}
+            onClick={() => reorder(row, -1)}
+          />
+          <ActionIcon
+            label="Move down"
+            icon={ArrowDown}
+            disabled={row.isRetired || siblingsOf(row).at(-1)?.id === row.id}
+            onClick={() => reorder(row, 1)}
+          />
+          <ActionIcon
+            label={deleteBlockReason(row) ?? 'Remove category'}
+            icon={Trash2}
+            tone="danger"
+            disabled={row.isRetired}
+            onClick={() => {
+              const why = deleteBlockReason(row);
+              if (why) setBlocked(why); else setDeleting(row);
+            }}
+          />
         </div>
       )
     }
   ];
 
-  const handleOpenAdd = () => {
-    setCatName('');
-    setCatDesc('');
-    setIsAddOpen(true);
-  };
+  async function toggle() {
+    if (!toggling) return;
+    const target = toggling;
+    setToggling(null);
 
-  const handleOpenEdit = (cat: CategoryItem) => {
-    setEditingCategory(cat);
-    setCatName(cat.name);
-    setCatDesc(cat.description);
-  };
-
-  const handleSaveCategory = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!catName.trim()) return;
-
-    if (editingCategory) {
-      // Edit
-      setCategories((prev) =>
-        prev.map((c) =>
-          c.id === editingCategory.id
-            ? { ...c, name: catName, description: catDesc }
-            : c
-        )
-      );
-      success(`Category ${catName} updated successfully`);
-      setEditingCategory(null);
+    const ok = await run((token) => updateCategory(token, target.id, target.displayOrder, !target.isActive));
+    if (ok) {
+      success(`${target.code} is now ${target.isActive ? 'hidden' : 'live'}.`);
+      taxonomy.reload();
     } else {
-      // Add
-      const newCat: CategoryItem = {
-        id: `CAT-0${categories.length + 1}`,
-        name: catName,
-        description: catDesc,
-        productCount: 0
-      };
-      setCategories((prev) => [...prev, newCat]);
-      success(`Category ${catName} added successfully`);
-      setIsAddOpen(false);
+      toastError(`${target.code} could not be updated.`);
     }
-  };
+  }
 
-  const handleDeleteConfirm = () => {
-    if (!deleteCategory) return;
-    setCategories((prev) => prev.filter((c) => c.id !== deleteCategory.id));
-    success(`Category ${deleteCategory.name} deleted successfully`);
-    setDeleteCategory(null);
-  };
+  async function save(draft: CategoryDraft) {
+    const editing = form?.editing ?? null;
+    const ok = await run((token) => editing
+      ? updateCategory(token, editing.id, draft.displayOrder, draft.isActive,
+          { nameEn: draft.nameEn, nameBn: draft.nameBn,
+            icon: draft.icon, imageUrl: draft.imageUrl })
+      : createCategory(token, draft));
 
-  const filteredCategories = categories.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.id.toLowerCase().includes(search.toLowerCase())
-  );
+    if (ok) {
+      success(editing ? `${editing.code} updated.` : `${draft.code} created.`);
+      setForm(null);
+      taxonomy.reload();
+    } else {
+      toastError(editing ? `${editing.code} could not be saved.` : 'That category could not be created.');
+    }
+  }
+
+  async function remove() {
+    if (!deleting) return;
+    const target = deleting;
+    setDeleting(null);
+
+    const ok = await run((token) => deleteCategory(token, target.id));
+    if (ok) {
+      success(`${target.code} removed.`);
+      taxonomy.reload();
+    } else {
+      // The procedure's own wording, now that the middleware maps 65095/65096
+      // instead of letting them fall through as a bare 500.
+      setBlocked(writeError ?? `${target.code} could not be removed.`);
+    }
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
-        title="Product Categories"
+        title="Category Taxonomy"
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Categories' }]}
         action={
-          <button
-            onClick={handleOpenAdd}
-            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
-          >
-            <Plus className="h-4.5 w-4.5" />
-            Add New Category
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary shadow-sm">
+              <FolderTree className="h-4 w-4" />
+              {rows.length} shown
+            </div>
+            <button
+              onClick={() => setShowRetired((v) => !v)}
+              aria-pressed={showRetired}
+              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+                showRetired
+                  ? 'border-primary/30 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground hover:bg-muted'}`}
+            >
+              <Archive className="h-4 w-4" />
+              {showRetired ? 'Hiding nothing' : 'Show retired'}
+            </button>
+            {/* Link, not a bare anchor: the console is served under a base path
+                (/Agromed-Admin), and a raw href drops it and 404s. */}
+            <Link
+              to="/categories/translations"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-muted"
+            >
+              <Languages className="h-4 w-4" />Review Bangla
+            </Link>
+            <button
+              onClick={() => setForm({ editing: null })}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" />New category
+            </button>
+          </div>
         }
       />
 
-      {/* Categories Table */}
       <DataTable
         columns={columns}
-        data={filteredCategories}
-        searchPlaceholder="Search categories..."
+        data={rows}
+        isLoading={taxonomy.loading || busy}
+        error={taxonomy.error}
+        onRetry={taxonomy.reload}
+        searchPlaceholder="Search by code or path..."
         searchValue={search}
         onSearchChange={setSearch}
       />
 
-      {/* Add / Edit Inline Dialog Panel (Mock Modal overlay) */}
-      {(isAddOpen || editingCategory !== null) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
-            onClick={() => {
-              setIsAddOpen(false);
-              setEditingCategory(null);
-            }}
-          />
-          <div className="bg-card border border-border/80 w-full max-w-md rounded-xl p-6 shadow-xl relative z-10 animate-in fade-in zoom-in-95">
-            <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-4">
-              <FolderPlus className="h-5 w-5 text-primary" />
-              {editingCategory ? 'Edit Product Category' : 'Create Product Category'}
-            </h3>
-            <form onSubmit={handleSaveCategory} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-foreground/80">Category Name</label>
-                <input
-                  type="text"
-                  required
-                  value={catName}
-                  onChange={(e) => setCatName(e.target.value)}
-                  placeholder="e.g. Fertilizers"
-                  className="w-full px-3 py-2 text-sm border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-foreground/80">Description</label>
-                <textarea
-                  rows={3}
-                  value={catDesc}
-                  onChange={(e) => setCatDesc(e.target.value)}
-                  placeholder="e.g. Chemical and organic nutrients..."
-                  className="w-full px-3 py-2 text-sm border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddOpen(false);
-                    setEditingCategory(null);
-                  }}
-                  className="px-4 py-2 border border-border bg-card hover:bg-muted text-foreground text-sm font-semibold rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg"
-                >
-                  Save Category
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete confirmation dialog */}
       <ConfirmDialog
-        isOpen={deleteCategory !== null}
-        title="Delete Product Category"
-        description={`Are you sure you want to permanently delete the category ${deleteCategory?.name}? This will un-categorize all products currently mapped to it.`}
-        confirmText="Confirm Delete"
-        variant="danger"
-        onConfirm={handleDeleteConfirm}
-        onCancel={() => setDeleteCategory(null)}
+        isOpen={toggling != null}
+        title={toggling?.isActive ? 'Hide this category?' : 'Show this category?'}
+        description={
+          toggling?.isActive
+            ? `${toggling.code} disappears from browse and search. Listings already in it stay where they are.`
+            : `${toggling?.code ?? ''} becomes browsable again.`
+        }
+        confirmText="Confirm"
+        variant={toggling?.isActive ? 'danger' : 'primary'}
+        onConfirm={toggle}
+        onCancel={() => setToggling(null)}
       />
+
+      <ConfirmDialog
+        isOpen={deleting != null}
+        title="Remove this category?"
+        description={`${deleting?.code ?? ''} is withdrawn from the taxonomy. Categories holding listings or sub-categories are refused.`}
+        confirmText="Remove"
+        variant="danger"
+        onConfirm={remove}
+        onCancel={() => setDeleting(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={blocked != null}
+        title="This category is in use"
+        description={blocked ?? ''}
+        confirmText="Understood"
+        variant="primary"
+        onConfirm={() => { setBlocked(null); clearError(); }}
+        onCancel={() => { setBlocked(null); clearError(); }}
+      />
+
+      {form && (
+        <CategoryForm
+          key={form.editing?.id ?? 'new'}
+          parents={taxonomy.data ?? []}
+          editing={form.editing}
+          saving={busy}
+          onCancel={() => setForm(null)}
+          onSubmit={save}
+          onImageChanged={taxonomy.reload}
+        />
+      )}
     </div>
   );
 }

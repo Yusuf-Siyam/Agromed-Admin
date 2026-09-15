@@ -1,214 +1,152 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Banknote, Percent, TrendingUp, Users } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
 import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
-import PercentageBadge from '@/components/shared/PercentageBadge';
-import StatusBadge from '@/components/shared/StatusBadge';
-import { DollarSign } from 'lucide-react';
-
-interface RevenueEntry {
-  id: string;
-  date: string;
-  sourceCompany: string;
-  amount: number;
-  type: 'commission' | 'transaction_fee' | 'premium_subscription';
-  status: string;
-}
+import { TrendChart } from '@/components/shared/AnalyticsCharts';
+import { useApi } from '@/lib/useApi';
+import { formatDate, formatMinor, getRevenueSeries, listSettlements } from '@/lib/superadmin-api';
+import type { RevenuePoint } from '@/lib/superadmin-api';
 
 export default function RevenueDashboard() {
-  const [search, setSearch] = useState('');
+  const [months, setMonths] = useState(12);
 
-  // Mock revenue details
-  const mockRevenueEntries: RevenueEntry[] = [
-    { id: 'REV-001', date: '2026-08-11', sourceCompany: 'Acme Agritech Solutions', amount: 120.00, type: 'commission', status: 'settled' },
-    { id: 'REV-002', date: '2026-08-11', sourceCompany: 'Bayer CropScience BD', amount: 78.00, type: 'commission', status: 'settled' },
-    { id: 'REV-003', date: '2026-08-10', sourceCompany: 'Greenfield Agro Ltd.', amount: 360.00, type: 'commission', status: 'settled' },
-    { id: 'REV-004', date: '2026-08-10', sourceCompany: 'Acme Agritech Solutions', amount: 360.00, type: 'transaction_fee', status: 'settled' },
-    { id: 'REV-005', date: '2026-08-09', sourceCompany: 'Sufala Fertilizer Co.', amount: 240.00, type: 'commission', status: 'settled' },
-    { id: 'REV-006', date: '2026-08-08', sourceCompany: 'Bayer CropScience BD', amount: 250.00, type: 'premium_subscription', status: 'settled' },
-    { id: 'REV-007', date: '2026-08-05', sourceCompany: 'Teesta Seed Distributors', amount: 180.00, type: 'commission', status: 'settled' },
-    { id: 'REV-008', date: '2026-08-03', sourceCompany: 'Greenfield Agro Ltd.', amount: 64.00, type: 'transaction_fee', status: 'settled' }
-  ];
+  const revenue = useApi((token) => getRevenueSeries(token, months), [months]);
+  const settlements = useApi((token) => listSettlements(token, { limit: 20 }), []);
 
-  const columns: Column<RevenueEntry>[] = [
-    { key: 'date', label: 'Billing Date', sortable: true },
-    { key: 'id', label: 'Entry ID' },
+  const series = useMemo(() => revenue.data ?? [], [revenue.data]);
+
+  const totals = useMemo(() => ({
+    gmv: series.reduce((t, p) => t + p.gmvMinor, 0),
+    commission: series.reduce((t, p) => t + p.commissionMinor, 0),
+    subsidy: series.reduce((t, p) => t + p.subsidyMinor, 0),
+    orders: series.reduce((t, p) => t + p.orderCount, 0)
+  }), [series]);
+
+  const net = totals.commission - totals.subsidy;
+  const take = totals.gmv === 0 ? null : (totals.commission / totals.gmv) * 100;
+  const commissionTrend = useMemo(() => series.map((point) => ({
+    label: formatDate(point.period).slice(0, 6),
+    value: point.commissionMinor,
+    detail: formatMinor(point.commissionMinor)
+  })), [series]);
+
+  const columns: Column<RevenuePoint>[] = [
+    { key: 'period', label: 'Month', render: (row) => formatDate(row.period) },
+    { key: 'orderCount', label: 'Orders', align: 'center' },
+    { key: 'gmvMinor', label: 'Gross merchandise value', align: 'right', render: (row) => formatMinor(row.gmvMinor) },
     {
-      key: 'sourceCompany',
-      label: 'Source Company',
-      sortable: true,
-      render: (row) => <span className="font-bold text-foreground">{row.sourceCompany}</span>
+      key: 'commissionMinor',
+      label: 'Commission',
+      align: 'right',
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.commissionMinor)}</span>
     },
     {
-      key: 'type',
-      label: 'Revenue Stream',
+      key: 'subsidyMinor',
+      label: 'Platform-funded discount',
+      align: 'right',
+      render: (row) => <span className="text-destructive">−{formatMinor(row.subsidyMinor)}</span>
+    },
+    {
+      key: 'net',
+      label: 'Net to platform',
+      align: 'right',
       render: (row) => (
-        <span className="text-[10px] px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono font-bold border border-border uppercase">
-          {row.type.replace('_', ' ')}
-        </span>
+        <span className="font-semibold text-foreground">{formatMinor(row.commissionMinor - row.subsidyMinor)}</span>
       )
     },
     {
-      key: 'amount',
-      label: 'Earned Amount',
-      align: 'right',
-      sortable: true,
-      render: (row) => `$${row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      render: (row) => <StatusBadge status={row.status} />
+      key: 'participants',
+      label: 'Active parties',
+      align: 'center',
+      render: (row) => <span className="text-xs text-muted-foreground">{row.buyerCount} buyers · {row.sellerCount} sellers</span>
     }
   ];
 
-  const filteredEntries = mockRevenueEntries.filter((item) =>
-    item.sourceCompany.toLowerCase().includes(search.toLowerCase()) ||
-    item.type.toLowerCase().includes(search.toLowerCase())
-  );
-
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
-        title="Revenue Dashboard"
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Financial', href: '/revenue' }, { label: 'Revenue' }]}
+        title="Platform Revenue"
+        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Revenue' }]}
         action={
-          <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg shadow-sm">
-            <DollarSign className="h-3.5 w-3.5" />
-            Revenue Registry Active
-          </div>
+          <select
+            value={months}
+            onChange={(e) => setMonths(Number(e.target.value))}
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground"
+          >
+            <option value={3}>Last 3 months</option>
+            <option value={6}>Last 6 months</option>
+            <option value={12}>Last 12 months</option>
+            <option value={24}>Last 24 months</option>
+          </select>
         }
       />
 
-      {/* Summary KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <FinancialSummaryCard
-          label="Consolidated Platform Revenue"
-          amount={124850.00}
-          subtext="Total commission & platform earnings"
-          variant="success"
-        />
-        <FinancialSummaryCard
-          label="Platform Net Profit"
-          amount={76350.00}
-          subtext="Gross earnings minus platform expenses"
-          variant="info"
-        />
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 flex flex-col justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Revenue Growth</p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-2xl font-black text-foreground">+12.2%</span>
-              <PercentageBadge value={12.2} type="growth" />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 font-medium">
-            Comparative growth rate versus last month
-          </p>
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <FinancialSummaryCard label="Commission earned" amount={formatMinor(totals.commission)} variant="success" subtext="The platform's own revenue" />
+        <FinancialSummaryCard label="Discount funded" amount={formatMinor(totals.subsidy)} variant="danger" subtext="Paid out of platform revenue" />
+        <FinancialSummaryCard label="Net" amount={formatMinor(net)} variant={net >= 0 ? 'info' : 'danger'} />
+        <FinancialSummaryCard label="Take rate" amount={take == null ? '—' : `${take.toFixed(2)}%`} subtext={`On ${formatMinor(totals.gmv)} of trade`} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Revenue Breakdown by Source Company (Horizontal Scale) */}
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-foreground">Revenue Splits by Partner</h3>
-            <p className="text-xs text-muted-foreground">Commission share contributions across onboarded suppliers</p>
-          </div>
-          <div className="space-y-3.5 pt-2">
-            {[
-              { name: 'Acme Agritech Solutions', amount: 45000, pct: 36.0 },
-              { name: 'Bayer CropScience BD', amount: 38000, pct: 30.4 },
-              { name: 'Greenfield Agro Ltd.', amount: 29000, pct: 23.2 },
-              { name: 'Sufala Fertilizer Co.', amount: 12850, pct: 10.4 }
-            ].map((split, idx) => (
-              <div key={idx} className="space-y-1.5 text-xs font-semibold">
-                <div className="flex justify-between items-center">
-                  <span className="text-foreground/80">{split.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-foreground">${split.amount.toLocaleString()}</span>
-                    <PercentageBadge value={split.pct} type="contribution" />
-                  </div>
-                </div>
-                <div className="w-full bg-muted rounded-full h-2">
-                  <div className="bg-primary h-2 rounded-full" style={{ width: `${split.pct}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Revenue vs Expenses vs Net Profit Area Chart (SVG Visualizer) */}
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-foreground">Platform Earnings Trends</h3>
-            <p className="text-xs text-muted-foreground">Comparative scale tracking gross revenue, expenses, and net profit margins</p>
-          </div>
-          <div className="h-48 relative border-b border-l border-border/80 mt-2">
-            <div className="absolute inset-0 flex flex-col justify-between py-2 pointer-events-none opacity-20">
-              <div className="border-t border-foreground w-full" />
-              <div className="border-t border-foreground w-full" />
-            </div>
-            <svg className="w-full h-full overflow-visible" preserveAspectRatio="none">
-              {/* Revenue Area (Primary green) */}
-              <path
-                d="M 0 140 Q 80 110 160 120 T 320 80 T 480 30 T 640 10"
-                fill="none"
-                stroke="hsl(var(--primary))"
-                strokeWidth="3"
-              />
-              {/* Net Profit Area (Teal / Info) */}
-              <path
-                d="M 0 160 Q 80 135 160 145 T 320 110 T 480 70 T 640 45"
-                fill="none"
-                stroke="hsl(var(--info))"
-                strokeWidth="3"
-              />
-              {/* Expenses Area (Red / Destructive) */}
-              <path
-                d="M 0 180 Q 80 175 160 175 T 320 170 T 480 160 T 640 155"
-                fill="none"
-                stroke="hsl(var(--destructive))"
-                strokeWidth="2"
-                strokeDasharray="4 4"
-              />
-            </svg>
-          </div>
-          <div className="flex justify-between text-[9px] text-muted-foreground font-bold font-mono px-1">
-            <span>Mar</span>
-            <span>Apr</span>
-            <span>May</span>
-            <span>Jun</span>
-            <span>Jul</span>
-            <span>Aug</span>
-          </div>
-          <div className="flex justify-center gap-4 text-xs font-bold pt-1">
-            <span className="flex items-center gap-1 text-primary">
-              <span className="w-2 h-2 rounded bg-primary" /> Revenue
-            </span>
-            <span className="flex items-center gap-1 text-info">
-              <span className="w-2 h-2 rounded bg-info" /> Net Profit
-            </span>
-            <span className="flex items-center gap-1 text-destructive">
-              <span className="w-2 h-2 border-b border-dashed border-destructive" /> Expenses
-            </span>
-          </div>
-        </div>
+      <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+        <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
+          <TrendingUp className="h-4 w-4 text-primary" />Commission by month
+        </h3>
+        {revenue.loading ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : series.length === 0 ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">No trade in this window yet.</p>
+        ) : (
+          <TrendChart
+            points={commissionTrend}
+            valueLabel="Commission"
+            valueFormatter={(value) => formatMinor(value)}
+            ariaLabel="Monthly platform commission revenue"
+          />
+        )}
       </div>
 
-      {/* Revenue Entries DataTable */}
       <div className="space-y-3">
-        <h3 className="text-sm font-bold text-foreground px-1">Platform Revenue Transactions Ledger</h3>
+        <h3 className="px-1 text-base font-bold text-foreground">Month by month</h3>
         <DataTable
           columns={columns}
-          data={filteredEntries}
-          searchPlaceholder="Search revenue by company or stream type..."
-          searchValue={search}
-          onSearchChange={setSearch}
+          data={series}
+          isLoading={revenue.loading}
+          error={revenue.error}
+          onRetry={revenue.reload}
         />
       </div>
+
+      <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+        <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
+          <Banknote className="h-4 w-4 text-primary" />Settled through
+        </h3>
+        {settlements.loading ? (
+          <p className="text-sm text-muted-foreground">Loading settlement runs…</p>
+        ) : (settlements.data?.items.length ?? 0) === 0 ? (
+          <p className="text-sm text-muted-foreground">No settlement run has been executed yet.</p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {(settlements.data?.items ?? []).slice(0, 5).map((r) => (
+              <li key={r.id} className="flex items-center justify-between">
+                <span className="text-foreground">{r.runReference}</span>
+                <span className="text-muted-foreground">
+                  {formatMinor(r.totalCommissionMinor, r.currency)} commission · {r.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Users className="h-3.5 w-3.5" />
+        <Percent className="h-3.5 w-3.5" />
+        Gross merchandise value is what buyers paid sellers. Only the commission column is the
+        platform&rsquo;s own income.
+      </p>
     </div>
   );
 }

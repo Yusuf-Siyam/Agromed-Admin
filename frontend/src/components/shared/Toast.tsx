@@ -55,7 +55,6 @@ export function useToast() {
   return context;
 }
 
-// Internal ToastContainer rendering portals
 function ToastContainer({ toasts, removeToast }: { toasts: ToastItem[]; removeToast: (id: string) => void }) {
   return createPortal(
     <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2.5 w-full max-w-sm pointer-events-none p-4">
@@ -67,7 +66,6 @@ function ToastContainer({ toasts, removeToast }: { toasts: ToastItem[]; removeTo
   );
 }
 
-// Single Toast card component
 function ToastCard({ toast, onClose }: { toast: ToastItem; onClose: () => void }) {
   useEffect(() => {
     const timer = setTimeout(onClose, toast.duration || 3000);

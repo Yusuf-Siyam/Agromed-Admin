@@ -10,20 +10,18 @@ export default function StatusBadge({ status, className }: StatusBadgeProps) {
 
   let colorClasses = 'bg-muted text-muted-foreground border-muted-foreground/20';
 
-  // Green / Teal (Success / Info)
   if (['completed', 'active', 'delivered', 'paid', 'approved', 'verified', 'success'].includes(normStatus)) {
     colorClasses = 'bg-info/10 text-info border-info/20';
-  } 
-  // Orange / Yellow (Warning / Pending)
+  }
+
   else if (['pending', 'processing', 'warning', 'shipped', 'in_progress', 'scheduled'].includes(normStatus)) {
     colorClasses = 'bg-secondary/10 text-secondary-foreground border-secondary/20';
-  } 
-  // Red (Error / Rejected / Danger)
+  }
+
   else if (['failed', 'suspended', 'cancelled', 'rejected', 'inactive', 'danger', 'error'].includes(normStatus)) {
     colorClasses = 'bg-destructive/10 text-destructive border-destructive/20';
   }
 
-  // Capitalize word
   const label = status.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 
   return (

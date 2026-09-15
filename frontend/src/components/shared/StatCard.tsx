@@ -18,11 +18,11 @@ export default function StatCard({ title, value, icon: Icon, trend, className }:
   return (
     <div
       className={cn(
-        'bg-card text-card-foreground border border-border/80 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow duration-200 flex flex-col justify-between',
+        'dashboard-card text-card-foreground p-5 min-h-32 transition-all duration-200 hover:-translate-y-0.5 flex flex-col justify-between',
         className
       )}
     >
-      <div className="flex items-center justify-between pb-2">
+      <div className="flex items-center justify-between pb-3">
         <span className="text-sm font-medium text-muted-foreground">{title}</span>
         <div className="p-2 bg-primary/5 text-primary rounded-lg border border-primary/10">
           <Icon className="h-5 w-5" />
@@ -33,7 +33,7 @@ export default function StatCard({ title, value, icon: Icon, trend, className }:
         <h3 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
           {value}
         </h3>
-        
+
         {trend && (
           <div className="flex items-center gap-1 mt-2">
             <span

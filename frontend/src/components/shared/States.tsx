@@ -1,7 +1,6 @@
 import { Loader2, AlertCircle, Inbox } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// --- LOADING STATE ---
 export interface LoadingStateProps {
   message?: string;
   className?: string;
@@ -16,7 +15,6 @@ export function LoadingState({ message = 'Loading data...', className }: Loading
   );
 }
 
-// --- EMPTY STATE ---
 export interface EmptyStateProps {
   title?: string;
   description?: string;
@@ -46,7 +44,6 @@ export function EmptyState({
   );
 }
 
-// --- ERROR STATE ---
 export interface ErrorStateProps {
   title?: string;
   message?: string;

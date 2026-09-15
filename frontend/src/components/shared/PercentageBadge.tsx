@@ -13,10 +13,10 @@ export default function PercentageBadge({ value, type, className }: PercentageBa
 
   if (type === 'growth') {
     const isPositive = value >= 0;
-    badgeColor = isPositive 
-      ? 'bg-info/10 text-info border-info/20' 
+    badgeColor = isPositive
+      ? 'bg-info/10 text-info border-info/20'
       : 'bg-destructive/10 text-destructive border-destructive/20';
-    icon = isPositive 
+    icon = isPositive
       ? <ArrowUpRight className="h-3.5 w-3.5 inline mr-0.5 shrink-0" />
       : <ArrowDownRight className="h-3.5 w-3.5 inline mr-0.5 shrink-0" />;
   } else if (type === 'margin') {

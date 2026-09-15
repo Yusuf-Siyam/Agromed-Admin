@@ -1,239 +1,156 @@
 import { useState } from 'react';
-import { Send, Bell, History, AlertTriangle, AlertCircle, Info, Loader2 } from 'lucide-react';
+import { Bell, History, Loader2, Send, Users } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
+import StatCard from '@/components/shared/StatCard';
 import { useToast } from '@/components/shared/Toast';
-import { mockBroadcasts, mockSystemAlerts } from '@/mock-data/notifications';
-import type { BroadcastNotification, SystemAlert } from '@/mock-data/notifications';
-import { cn } from '@/lib/utils';
+import { useApi, useApiAction } from '@/lib/useApi';
+import { formatDate, listBroadcasts, sendBroadcast } from '@/lib/superadmin-api';
+import type { Broadcast } from '@/lib/superadmin-api';
 
 export default function NotificationCenter() {
-  const { success, error } = useToast();
+  const { success, error: toastError } = useToast();
+  const { run, busy } = useApiAction();
 
-  const [broadcasts, setBroadcasts] = useState<BroadcastNotification[]>(mockBroadcasts);
-  const [alerts, setAlerts] = useState<SystemAlert[]>(mockSystemAlerts);
-
-  // Form states
-  const [targetAudience, setTargetAudience] = useState<'all' | 'farmers' | 'companies' | 'service_providers'>('all');
+  const [audience, setAudience] = useState<'all' | 'buyers' | 'sellers'>('all');
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
 
-  const broadcastColumns: Column<BroadcastNotification>[] = [
-    { key: 'id', label: 'ID' },
+  const broadcasts = useApi((token) => listBroadcasts(token, 50), []);
+  const sent = broadcasts.data ?? [];
+
+  const columns: Column<Broadcast>[] = [
     {
       key: 'title',
-      label: 'Notification Title',
-      render: (row) => <span className="font-bold text-foreground">{row.title}</span>
-    },
-    {
-      key: 'targetAudience',
-      label: 'Audience Target',
+      label: 'Broadcast',
       render: (row) => (
-        <span className="text-[10px] px-2 py-0.5 border border-border bg-muted text-foreground/80 font-bold uppercase rounded-md">
-          {row.targetAudience.replace('_', ' ')}
+        <div className="flex max-w-lg flex-col">
+          <span className="font-bold text-foreground">{row.title}</span>
+          <span className="truncate text-xs text-muted-foreground">{row.body}</span>
+        </div>
+      )
+    },
+    { key: 'recipientCount', label: 'Recipients', align: 'center' },
+    {
+      key: 'deliveredCount',
+      label: 'Delivered',
+      align: 'center',
+      render: (row) => (
+        <span className={row.deliveredCount < row.recipientCount ? 'text-muted-foreground' : 'font-semibold text-success'}>
+          {row.deliveredCount} / {row.recipientCount}
         </span>
       )
     },
-    {
-      key: 'message',
-      label: 'Broadcast Message Details',
-      render: (row) => <p className="text-xs text-muted-foreground line-clamp-1 max-w-sm">{row.message}</p>
-    },
-    { key: 'date', label: 'Broadcast Date' }
+    { key: 'createdAt', label: 'Sent', render: (row) => formatDate(row.createdAt) }
   ];
 
-  const handleSendNotification = (e: React.FormEvent) => {
+  async function dispatch(e: React.FormEvent) {
     e.preventDefault();
-
-    if (!title.trim()) {
-      error('Notification title is required');
-      return;
-    }
-    if (!message.trim()) {
-      error('Broadcast message cannot be empty');
+    if (!title.trim() || !message.trim()) {
+      toastError('A broadcast needs a title and a message.');
       return;
     }
 
-    setIsLoading(true);
-
-    // Simulate API broadcast dispatch
-    setTimeout(() => {
-      setIsLoading(false);
-      
-      const newBroadcast: BroadcastNotification = {
-        id: `NOT-${broadcasts.length + 101}`,
-        targetAudience,
-        title,
-        message,
-        date: new Date().toISOString().split('T')[0]
-      };
-
-      setBroadcasts((prev) => [newBroadcast, ...prev]);
-      success('Broadcast Notification dispatched successfully');
-      
-      // Reset form
+    const ok = await run((token) => sendBroadcast(token, title.trim(), message.trim(), audience));
+    if (ok) {
+      success('Broadcast dispatched.');
       setTitle('');
       setMessage('');
-    }, 1000);
-  };
-
-  const getAlertIcon = (severity: 'info' | 'warning' | 'danger') => {
-    switch (severity) {
-      case 'danger':
-        return <AlertCircle className="h-4.5 w-4.5 text-destructive shrink-0" />;
-      case 'warning':
-        return <AlertTriangle className="h-4.5 w-4.5 text-secondary-foreground shrink-0" />;
-      case 'info':
-        return <Info className="h-4.5 w-4.5 text-info shrink-0" />;
+      broadcasts.reload();
+    } else {
+      toastError('That broadcast could not be sent.');
     }
-  };
+  }
 
-  const handleDismissAlert = (id: string) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-    success('Alert dismissed');
-  };
+  const totalRecipients = sent.reduce((t, b) => t + b.recipientCount, 0);
+  const totalDelivered = sent.reduce((t, b) => t + b.deliveredCount, 0);
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader title="Notification & System Alerts Center" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Notifications' }]} />
+      <PageHeader title="Notification Centre" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Notifications' }]} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Columns: Send notification form */}
-        <div className="lg:col-span-1 space-y-6">
-          
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard title="Broadcasts sent" value={sent.length} icon={History} />
+        <StatCard title="Recipients reached" value={totalRecipients.toLocaleString()} icon={Users} />
+        <StatCard title="Delivered" value={totalDelivered.toLocaleString()} icon={Bell} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-1">
+          <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+            <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
               <Bell className="h-4.5 w-4.5 text-primary" />
-              Dispatch Broadcast
+              Dispatch broadcast
             </h3>
 
-            <form onSubmit={handleSendNotification} className="space-y-4">
-              
-              {/* Audience Target */}
+            <form onSubmit={dispatch} className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-foreground/80">Target Segment</label>
+                <label className="text-[11px] font-bold text-foreground/80" htmlFor="broadcast-audience">Audience</label>
                 <select
-                  value={targetAudience}
-                  onChange={(e) => setTargetAudience(e.target.value as any)}
-                  disabled={isLoading}
-                  className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  id="broadcast-audience"
+                  value={audience}
+                  onChange={(e) => setAudience(e.target.value as 'all' | 'buyers' | 'sellers')}
+                  disabled={busy}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="all">All Stakeholders</option>
-                  <option value="farmers">Farmers Only</option>
-                  <option value="companies">Agro Company Partners</option>
-                  <option value="service_providers">Service Providers</option>
+                  <option value="all">Everyone on the platform</option>
+                  <option value="buyers">Farmers and buying organisations</option>
+                  <option value="sellers">Manufacturers and importers</option>
                 </select>
               </div>
 
-              {/* Title */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-foreground/80">Notification Title</label>
+                <label className="text-[11px] font-bold text-foreground/80" htmlFor="broadcast-title">Title</label>
                 <input
-                  type="text"
+                  id="broadcast-title"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  disabled={isLoading}
-                  placeholder="e.g. Schedule Maintenance"
-                  className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  maxLength={200}
+                  disabled={busy}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="Brown planthopper warning — Rajshahi"
                 />
               </div>
 
-              {/* Message */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-foreground/80">Message Body</label>
+                <label className="text-[11px] font-bold text-foreground/80" htmlFor="broadcast-body">Message</label>
                 <textarea
-                  rows={4}
+                  id="broadcast-body"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  disabled={isLoading}
-                  placeholder="Write the message text here..."
-                  className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  rows={6}
+                  maxLength={2000}
+                  disabled={busy}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  placeholder="What has happened, what to look for, and what to do about it."
                 />
+                <p className="text-[11px] text-muted-foreground">{message.length} / 2000</p>
               </div>
 
-              {/* Submit button */}
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-2 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/95 disabled:opacity-60"
               >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4.5 w-4.5 animate-spin" />
-                    Broadcasting...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    Send Broadcast Notification
-                  </>
-                )}
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                {busy ? 'Sending…' : 'Send broadcast'}
               </button>
-
             </form>
           </div>
-
         </div>
 
-        {/* Right Columns: System Alerts logs */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-foreground tracking-wider uppercase">Active Platform System Diagnostics</h3>
-            
-            {alerts.length === 0 ? (
-              <div className="p-6 text-center text-xs font-medium text-muted-foreground bg-muted/20 border border-dashed border-border rounded-lg">
-                No active system alerts. All nodes running healthy.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {alerts.map((alert) => (
-                  <div
-                    key={alert.id}
-                    className={cn(
-                      'flex items-start justify-between p-3.5 border rounded-xl gap-3 shadow-sm transition-all',
-                      alert.severity === 'danger'
-                        ? 'border-destructive/35 bg-destructive/[0.01]'
-                        : alert.severity === 'warning'
-                        ? 'border-secondary/35 bg-secondary/[0.01]'
-                        : 'border-info/35 bg-info/[0.01]'
-                    )}
-                  >
-                    <div className="flex gap-2.5 items-start">
-                      {getAlertIcon(alert.severity)}
-                      <div className="space-y-1 text-xs font-medium">
-                        <span className="text-[10px] text-muted-foreground font-bold">{alert.timestamp}</span>
-                        <p className="text-foreground leading-normal">{alert.message}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDismissAlert(alert.id)}
-                      className="px-2 py-1 border border-border hover:bg-muted text-foreground text-[10px] font-bold rounded transition-colors cursor-pointer shrink-0"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="space-y-3 lg:col-span-2">
+          <h3 className="px-1 text-base font-bold text-foreground">Broadcast history</h3>
+          <DataTable
+            columns={columns}
+            data={sent}
+            isLoading={broadcasts.loading}
+            error={broadcasts.error}
+            onRetry={broadcasts.reload}
+          />
         </div>
-
       </div>
-
-      {/* Broadcast History table list */}
-      <div className="space-y-3">
-        <h3 className="text-base font-bold text-foreground px-1 flex items-center gap-1.5">
-          <History className="h-4.5 w-4.5 text-muted-foreground" />
-          Historical Broadcast Log
-        </h3>
-        <DataTable columns={broadcastColumns} data={broadcasts} />
-      </div>
-
     </div>
   );
 }

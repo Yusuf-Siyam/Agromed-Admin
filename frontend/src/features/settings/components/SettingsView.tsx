@@ -1,488 +1,339 @@
-import { useState } from 'react';
-import { Settings, Lock, Palette, Info, Check, Loader2, User } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, Info, Loader2, Lock, Palette, Settings, User } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import { useToast } from '@/components/shared/Toast';
+import { useApi, useApiAction } from '@/lib/useApi';
+import {
+  changePassword, getCommissionSettings, getCurrentUser, listFeatures,
+  setFeature, updateCommissionSettings, updateProfile
+} from '@/lib/superadmin-api';
 import { cn } from '@/lib/utils';
 
 type ActiveTab = 'general' | 'platform' | 'profile' | 'password' | 'theme';
 
+const CONFIG_KEY = 'platform.configuration';
+
+interface PlatformConfig {
+  platformName: string;
+  supportEmail: string;
+  supportPhone: string;
+  taxRatePercent: string;
+  minPayoutMinor: string;
+  maintenanceMode: boolean;
+}
+
+const EMPTY_CONFIG: PlatformConfig = {
+  platformName: '', supportEmail: '', supportPhone: '',
+  taxRatePercent: '', minPayoutMinor: '', maintenanceMode: false
+};
+
+const TABS: { id: ActiveTab; label: string; icon: typeof Settings }[] = [
+  { id: 'general', label: 'General Info', icon: Info },
+  { id: 'platform', label: 'Platform Controls', icon: Settings },
+  { id: 'profile', label: 'Admin Profile', icon: User },
+  { id: 'password', label: 'Security & Access', icon: Lock },
+  { id: 'theme', label: 'Visual Themes', icon: Palette }
+];
+
 export default function SettingsView() {
   const { success, error } = useToast();
+  const { run, busy } = useApiAction();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('general');
-  const [isLoading, setIsLoading] = useState(false);
 
-  // Form states - General
-  const [platformName, setPlatformName] = useState('AgroMED Connect');
-  const [supportEmail, setSupportEmail] = useState('support@agromed.connect');
-  const [supportPhone, setSupportPhone] = useState('+880 9612-445566');
+  const features = useApi((token) => listFeatures(token), []);
+  const commission = useApi((token) => getCommissionSettings(token), []);
+  const me = useApi((token) => getCurrentUser(token), []);
 
-  // Form states - Platform
-  const [commissionRate, setCommissionRate] = useState('10.0');
-  const [taxRate, setTaxRate] = useState('5.0');
-  const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [minPayoutAmount, setMinPayoutAmount] = useState('250.00');
+  const [config, setConfig] = useState<PlatformConfig>(EMPTY_CONFIG);
+  const [rate, setRate] = useState('');
+  const [rateNote, setRateNote] = useState('');
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
 
-  // Form states - Profile Settings
-  const [adminName, setAdminName] = useState('Yusuf Siyam');
-  const [adminEmail, setAdminEmail] = useState('yusuf.siyam@agromed.connect');
-  const [adminPhone, setAdminPhone] = useState('+880 1711-223344');
-
-  // Form states - Change Password
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordErrors, setPasswordErrors] = useState<Record<string, string>>({});
 
-  // Form states - Theme
-  const [themeMode, setThemeMode] = useState<'light' | 'dark'>('light');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(
+    () => (document.documentElement.classList.contains('dark') ? 'dark' : 'light'));
 
-  const handleSaveGeneral = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const storedConfig = useMemo(() => {
+    const row = (features.data ?? []).find((f) => f.featureKey === CONFIG_KEY);
+    if (!row?.configurationJson) return null;
+    try { return JSON.parse(row.configurationJson) as Partial<PlatformConfig>; }
+    catch { return null; }
+  }, [features.data]);
 
-    setTimeout(() => {
-      setIsLoading(false);
-      success('General application settings updated successfully');
-    }, 1000);
-  };
+  useEffect(() => {
+    if (!storedConfig) return;
 
-  const handleSavePlatform = (e: React.FormEvent) => {
-    e.preventDefault();
+    setConfig({ ...EMPTY_CONFIG, ...storedConfig });
+  }, [storedConfig]);
 
-    const parsedRate = parseFloat(commissionRate);
-    if (isNaN(parsedRate) || parsedRate < 0 || parsedRate > 100) {
-      error('Commission rate percentage must be between 0 and 100');
+  useEffect(() => {
+    if (!commission.data) return;
+
+    setRate(String(commission.data.defaultRatePercent));
+  }, [commission.data]);
+
+  useEffect(() => {
+    if (!me.data) return;
+
+    setAdminName(me.data.fullName);
+    setAdminEmail(me.data.email ?? '');
+  }, [me.data]);
+
+  async function saveConfig() {
+    const ok = await run((token) => setFeature(token, CONFIG_KEY, !config.maintenanceMode, JSON.stringify(config)));
+    if (ok) { success('Platform configuration saved.'); features.reload(); }
+    else error('That configuration could not be saved.');
+  }
+
+  async function saveRate() {
+    const value = Number(rate);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      error('The commission rate is a percentage between 0 and 100.');
       return;
     }
-
-    const parsedTax = parseFloat(taxRate);
-    if (isNaN(parsedTax) || parsedTax < 0 || parsedTax > 100) {
-      error('Tax rate percentage must be between 0 and 100');
-      return;
+    const ok = await run((token) => updateCommissionSettings(token, value, rateNote.trim() || undefined));
+    if (ok) {
+      success('A new commission rule set has been published.');
+      setRateNote('');
+      commission.reload();
+    } else {
+      error('The commission rate could not be changed.');
     }
+  }
 
-    setIsLoading(true);
+  async function saveProfile() {
+    if (adminName.trim().length < 2) { error('Enter your name.'); return; }
+    const ok = await run((token) => updateProfile(token, adminName.trim(), adminEmail.trim() || null));
+    if (ok) { success('Profile updated.'); me.reload(); }
+    else error('Your profile could not be updated.');
+  }
 
-    setTimeout(() => {
-      setIsLoading(false);
-      success('Platform system configuration updated');
-    }, 1000);
-  };
-
-  const handleSaveProfile = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      success('Admin profile credentials updated');
-    }, 1000);
-  };
-
-  const handleSavePassword = (e: React.FormEvent) => {
-    e.preventDefault();
+  async function savePassword() {
     const errs: Record<string, string> = {};
+    if (!currentPassword) errs.current = 'Enter your current password';
+    if (newPassword.length < 8) errs.next = 'The new password must be at least 8 characters';
+    if (newPassword !== confirmPassword) errs.confirm = 'The two passwords do not match';
+    setPasswordErrors(errs);
+    if (Object.keys(errs).length) return;
 
-    if (!currentPassword) errs.currentPassword = 'Current password is required';
-    if (newPassword.length < 6) {
-      errs.newPassword = 'New password must be at least 6 characters long';
+    const ok = await run((token) => changePassword(token, currentPassword, newPassword));
+    if (ok) {
+      success('Password changed.');
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    } else {
+      error('Your current password was not accepted.');
     }
-    if (newPassword !== confirmPassword) {
-      errs.confirmPassword = 'New password confirmation does not match';
-    }
+  }
 
-    if (Object.keys(errs).length > 0) {
-      setPasswordErrors(errs);
-      error('Please check password validation requirements');
-      return;
-    }
+  function applyTheme(mode: 'light' | 'dark') {
+    setThemeMode(mode);
+    document.documentElement.classList.toggle('dark', mode === 'dark');
+    try { localStorage.setItem('agromed-admin-theme', mode); } catch { void 0; }
+    success(`${mode === 'dark' ? 'Dark' : 'Light'} theme applied.`);
+  }
 
-    setPasswordErrors({});
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      success('Administrator password updated successfully');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-    }, 1200);
-  };
-
-  const handleSaveTheme = () => {
-    success(`Theme mode updated to ${themeMode.toUpperCase()}`);
-  };
+  const field = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20';
+  const label = 'block text-xs font-bold text-foreground/80 mb-1';
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <PageHeader title="System Settings Center" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Settings' }]} />
+      <PageHeader title="System Settings" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Settings' }]} />
 
-      {/* Main layout container: Tab navigation sidebar + Tab content */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        
-        {/* Left Side: Sidebar controls */}
-        <div className="md:col-span-1 space-y-2">
-          {[
-            { id: 'general' as const, label: 'General Info', icon: Info },
-            { id: 'platform' as const, label: 'Platform Controls', icon: Settings },
-            { id: 'profile' as const, label: 'Admin Profile', icon: User },
-            { id: 'password' as const, label: 'Security & Access', icon: Lock },
-            { id: 'theme' as const, label: 'Visual Themes', icon: Palette }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setPasswordErrors({});
-                }}
-                className={cn(
-                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm',
-                  isSelected
-                    ? 'border-primary bg-muted/10 text-primary'
-                    : 'border-border/60 bg-card hover:bg-muted/40 text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <Icon className="h-4.5 w-4.5 shrink-0" />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Side: Tab content container */}
-        <div className="md:col-span-3">
-          <div className="bg-card border border-border/80 rounded-xl p-6 shadow-sm min-h-[300px]">
-            
-            {/* General Settings */}
-            {activeTab === 'general' && (
-              <form onSubmit={handleSaveGeneral} className="space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3">
-                  <h3 className="text-base font-bold text-foreground">General Application Settings</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Configure platform titles and customer helpdesk contacts.</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 max-w-xl">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Application / Portal Title</label>
-                    <input
-                      type="text"
-                      required
-                      value={platformName}
-                      onChange={(e) => setPlatformName(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Support Hotline Email</label>
-                    <input
-                      type="email"
-                      required
-                      value={supportEmail}
-                      onChange={(e) => setSupportEmail(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Helpdesk Support Number</label>
-                    <input
-                      type="text"
-                      required
-                      value={supportPhone}
-                      onChange={(e) => setSupportPhone(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Save Configuration
-                  </button>
-                </div>
-              </form>
+      <div className="flex overflow-x-auto rounded-t-xl border-b border-border/60 bg-card shadow-sm">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              'flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-5 py-3.5 text-xs font-bold transition-all',
+              activeTab === tab.id ? 'border-primary bg-muted/10 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
             )}
-
-            {/* Platform Controls */}
-            {activeTab === 'platform' && (
-              <form onSubmit={handleSavePlatform} className="space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3">
-                  <h3 className="text-base font-bold text-foreground">Platform Fee & Payout Controls</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Define business transaction commission rates and system parameters.</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 max-w-xl">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Default Commission Rate (%)</label>
-                    <input
-                      type="text"
-                      required
-                      value={commissionRate}
-                      onChange={(e) => setCommissionRate(e.target.value)}
-                      disabled={isLoading}
-                      placeholder="10.0"
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Default Platform Tax Rate (%)</label>
-                    <input
-                      type="text"
-                      required
-                      value={taxRate}
-                      onChange={(e) => setTaxRate(e.target.value)}
-                      disabled={isLoading}
-                      placeholder="5.0"
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Minimum Settlement Payout Balance ($)</label>
-                    <input
-                      type="text"
-                      required
-                      value={minPayoutAmount}
-                      onChange={(e) => setMinPayoutAmount(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between p-3.5 border border-border/80 rounded-xl bg-muted/20">
-                    <div className="space-y-0.5 max-w-[80%]">
-                      <span className="text-xs font-bold text-foreground">Maintenance System Mode</span>
-                      <p className="text-[10px] text-muted-foreground leading-normal">
-                        Locks the farmer and buyer portals temporarily for server maintenance. Admin operations remain active.
-                      </p>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={maintenanceMode}
-                        onChange={(e) => setMaintenanceMode(e.target.checked)}
-                        disabled={isLoading}
-                        className="sr-only peer text-primary focus:ring-primary"
-                      />
-                      <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-card after:border-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary" />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Save Parameters
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Profile Settings */}
-            {activeTab === 'profile' && (
-              <form onSubmit={handleSaveProfile} className="space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3">
-                  <h3 className="text-base font-bold text-foreground">Admin Profile Settings</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Configure your administrator account details.</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 max-w-xl">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Full Name</label>
-                    <input
-                      type="text"
-                      required
-                      value={adminName}
-                      onChange={(e) => setAdminName(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      value={adminEmail}
-                      onChange={(e) => setAdminEmail(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Contact Phone</label>
-                    <input
-                      type="text"
-                      required
-                      value={adminPhone}
-                      onChange={(e) => setAdminPhone(e.target.value)}
-                      disabled={isLoading}
-                      className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Save Profile
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Change Password Form */}
-            {activeTab === 'password' && (
-              <form onSubmit={handleSavePassword} className="space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3">
-                  <h3 className="text-base font-bold text-foreground">Security Settings</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Ensure your administrator access remains secure.</p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 max-w-xl">
-                  {/* Current Password */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Current Administrator Password</label>
-                    <input
-                      type="password"
-                      value={currentPassword}
-                      onChange={(e) => {
-                        setCurrentPassword(e.target.value);
-                        if (passwordErrors.currentPassword) setPasswordErrors({ ...passwordErrors, currentPassword: '' });
-                      }}
-                      disabled={isLoading}
-                      className={cn(
-                        'w-full px-3 py-2 text-xs border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow',
-                        passwordErrors.currentPassword ? 'border-destructive focus:ring-destructive/20' : 'border-border focus:ring-primary/20'
-                      )}
-                    />
-                    {passwordErrors.currentPassword && <p className="text-[10px] text-destructive font-medium">{passwordErrors.currentPassword}</p>}
-                  </div>
-
-                  {/* New Password */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">New Secure Password</label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => {
-                        setNewPassword(e.target.value);
-                        if (passwordErrors.newPassword) setPasswordErrors({ ...passwordErrors, newPassword: '' });
-                      }}
-                      disabled={isLoading}
-                      className={cn(
-                        'w-full px-3 py-2 text-xs border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow',
-                        passwordErrors.newPassword ? 'border-destructive focus:ring-destructive/20' : 'border-border focus:ring-primary/20'
-                      )}
-                    />
-                    {passwordErrors.newPassword && <p className="text-[10px] text-destructive font-medium">{passwordErrors.newPassword}</p>}
-                  </div>
-
-                  {/* Confirm Password */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-foreground/80">Confirm New Password</label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => {
-                        setConfirmPassword(e.target.value);
-                        if (passwordErrors.confirmPassword) setPasswordErrors({ ...passwordErrors, confirmPassword: '' });
-                      }}
-                      disabled={isLoading}
-                      className={cn(
-                        'w-full px-3 py-2 text-xs border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow',
-                        passwordErrors.confirmPassword ? 'border-destructive focus:ring-destructive/20' : 'border-border focus:ring-primary/20'
-                      )}
-                    />
-                    {passwordErrors.confirmPassword && <p className="text-[10px] text-destructive font-medium">{passwordErrors.confirmPassword}</p>}
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    Update Password
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Visual Theme Selection */}
-            {activeTab === 'theme' && (
-              <div className="space-y-5 animate-in fade-in duration-200">
-                <div className="border-b border-border/60 pb-3">
-                  <h3 className="text-base font-bold text-foreground">Visual Theme Configuration</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">Toggle application appearance parameters.</p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 max-w-xl">
-                  {/* Light */}
-                  <button
-                    onClick={() => setThemeMode('light')}
-                    className={cn(
-                      'p-5 border rounded-xl flex flex-col items-center gap-3 text-xs font-bold shadow-sm transition-all cursor-pointer',
-                      themeMode === 'light'
-                        ? 'border-primary bg-muted/10 text-primary'
-                        : 'border-border/60 bg-card hover:bg-muted/30 text-muted-foreground'
-                    )}
-                  >
-                    <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-300 block" />
-                    Portal Light Mode
-                  </button>
-
-                  {/* Dark */}
-                  <button
-                    onClick={() => setThemeMode('dark')}
-                    className={cn(
-                      'p-5 border rounded-xl flex flex-col items-center gap-3 text-xs font-bold shadow-sm transition-all cursor-pointer',
-                      themeMode === 'dark'
-                        ? 'border-primary bg-muted/10 text-primary'
-                        : 'border-border/60 bg-card hover:bg-muted/30 text-muted-foreground'
-                    )}
-                  >
-                    <span className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 block" />
-                    Portal Dark Mode
-                  </button>
-                </div>
-
-                <div className="flex justify-end pt-4 border-t border-border/60">
-                  <button
-                    onClick={handleSaveTheme}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
-                  >
-                    <Check className="h-4 w-4" />
-                    Apply Theme
-                  </button>
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-
+          >
+            <tab.icon className="h-4 w-4" />
+            {tab.label}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'general' && (
+        <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">General application settings</h3>
+            <p className="text-xs text-muted-foreground">
+              Stored as configuration on the <code className="font-mono">{CONFIG_KEY}</code> feature flag.
+            </p>
+          </div>
+          {features.loading ? <p className="text-sm text-muted-foreground">Loading…</p> : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className={label} htmlFor="platform-name">Portal title</label>
+                <input id="platform-name" className={field} value={config.platformName}
+                  onChange={(e) => setConfig({ ...config, platformName: e.target.value })} placeholder="AgroMedConnect" />
+              </div>
+              <div>
+                <label className={label} htmlFor="support-email">Support email</label>
+                <input id="support-email" type="email" className={field} value={config.supportEmail}
+                  onChange={(e) => setConfig({ ...config, supportEmail: e.target.value })} placeholder="support@agromedconnect.com" />
+              </div>
+              <div>
+                <label className={label} htmlFor="support-phone">Support hotline</label>
+                <input id="support-phone" className={field} value={config.supportPhone}
+                  onChange={(e) => setConfig({ ...config, supportPhone: e.target.value })} placeholder="+8809612445566" />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input type="checkbox" checked={config.maintenanceMode}
+                    onChange={(e) => setConfig({ ...config, maintenanceMode: e.target.checked })} />
+                  Maintenance mode
+                </label>
+              </div>
+            </div>
+          )}
+          <button onClick={saveConfig} disabled={busy}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Save configuration
+          </button>
+        </section>
+      )}
+
+      {activeTab === 'platform' && (
+        <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">Commission</h3>
+            <p className="text-xs text-muted-foreground">
+              {commission.data
+                ? `Rule set v${commission.data.versionNumber}, ${commission.data.status}.`
+                : 'Loading the active rule set…'}
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <label className={label} htmlFor="commission-rate">Default rate (%)</label>
+              <input id="commission-rate" type="number" step="0.1" min="0" max="100" className={field}
+                value={rate} onChange={(e) => setRate(e.target.value)} />
+            </div>
+            <div className="md:col-span-2">
+              <label className={label} htmlFor="commission-note">Why it is changing</label>
+              <input id="commission-note" className={field} value={rateNote}
+                onChange={(e) => setRateNote(e.target.value)} placeholder="Seasonal adjustment for the Aman harvest" />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className={label} htmlFor="tax-rate">Tax rate (%)</label>
+              <input id="tax-rate" className={field} value={config.taxRatePercent}
+                onChange={(e) => setConfig({ ...config, taxRatePercent: e.target.value })} placeholder="5.0" />
+            </div>
+            <div>
+              <label className={label} htmlFor="min-payout">Minimum payout (৳)</label>
+              <input id="min-payout" className={field} value={config.minPayoutMinor}
+                onChange={(e) => setConfig({ ...config, minPayoutMinor: e.target.value })} placeholder="250" />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={saveRate} disabled={busy}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Publish new rule set
+            </button>
+            <button onClick={saveConfig} disabled={busy}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-semibold text-foreground disabled:opacity-60">
+              Save tax and payout settings
+            </button>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'profile' && (
+        <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">Your administrator account</h3>
+            <p className="text-xs text-muted-foreground">
+              {me.data ? `Signed in as ${me.data.fullName} · ${me.data.roles.join(', ')}` : 'Loading…'}
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className={label} htmlFor="admin-name">Name</label>
+              <input id="admin-name" className={field} value={adminName} onChange={(e) => setAdminName(e.target.value)} />
+            </div>
+            <div>
+              <label className={label} htmlFor="admin-email">Email</label>
+              <input id="admin-email" type="email" className={field} value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
+            </div>
+            <div>
+              <label className={label} htmlFor="admin-phone">Phone</label>
+              {
+}
+              <input id="admin-phone" className={cn(field, 'opacity-60')} value={me.data?.phone ?? ''} readOnly />
+              <p className="mt-1 text-[11px] text-muted-foreground">Your phone number is your sign-in identifier and cannot be changed here.</p>
+            </div>
+          </div>
+          <button onClick={saveProfile} disabled={busy}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Save profile
+          </button>
+        </section>
+      )}
+
+      {activeTab === 'password' && (
+        <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="text-sm font-bold text-foreground">Change your password</h3>
+          <div className="grid gap-4 md:max-w-md">
+            <div>
+              <label className={label} htmlFor="current-password">Current password</label>
+              <input id="current-password" type="password" autoComplete="current-password" className={field}
+                value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+              {passwordErrors.current && <p className="mt-1 text-xs text-destructive">{passwordErrors.current}</p>}
+            </div>
+            <div>
+              <label className={label} htmlFor="new-password">New password</label>
+              <input id="new-password" type="password" autoComplete="new-password" className={field}
+                value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+              {passwordErrors.next && <p className="mt-1 text-xs text-destructive">{passwordErrors.next}</p>}
+            </div>
+            <div>
+              <label className={label} htmlFor="confirm-password">Confirm new password</label>
+              <input id="confirm-password" type="password" autoComplete="new-password" className={field}
+                value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+              {passwordErrors.confirm && <p className="mt-1 text-xs text-destructive">{passwordErrors.confirm}</p>}
+            </div>
+          </div>
+          <button onClick={savePassword} disabled={busy}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}Change password
+          </button>
+          <p className="text-xs text-muted-foreground">
+            Changing your password signs out your other sessions.
+          </p>
+        </section>
+      )}
+
+      {activeTab === 'theme' && (
+        <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">Appearance</h3>
+            <p className="text-xs text-muted-foreground">
+              A preference for this browser. It is not sent to the server, because it is not
+              something the platform needs to know about you.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {(['light', 'dark'] as const).map((mode) => (
+              <button key={mode} onClick={() => applyTheme(mode)}
+                className={cn('cursor-pointer rounded-lg border px-4 py-2 text-sm font-semibold capitalize transition-colors',
+                  themeMode === mode ? 'border-primary bg-primary/10 text-primary' : 'border-border text-foreground hover:bg-muted')}>
+                {mode}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
