@@ -1,222 +1,159 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Activity, Building2, ShoppingCart, Users } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
-import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
-import PercentageBadge from '@/components/shared/PercentageBadge';
-import { Calendar, TrendingUp, BarChart2 } from 'lucide-react';
-
-type TimeRange = 'today' | 'week' | 'month' | 'year' | 'custom';
-
-interface AnalyticsPayload {
-  sales: number;
-  revenue: number;
-  profit: number;
-  growth: number;
-  labels: string[];
-  profitPoints: string; // SVG path points
-  periodSales: number[]; // Bar values
-}
+import StatCard from '@/components/shared/StatCard';
+import DataTable from '@/components/shared/DataTable';
+import type { Column } from '@/components/shared/DataTable';
+import { DistributionChart, TrendChart } from '@/components/shared/AnalyticsCharts';
+import { useApi } from '@/lib/useApi';
+import {
+  formatDate, formatMinor, getRevenueSeries, getSuperAdminDashboard,
+  listOrders, listOrganisations
+} from '@/lib/superadmin-api';
+import type { RevenuePoint } from '@/lib/superadmin-api';
 
 export default function PlatformAnalytics() {
-  const [selectedRange, setSelectedRange] = useState<TimeRange>('month');
-  const [startDate, setStartDate] = useState('2026-08-01');
-  const [endDate, setEndDate] = useState('2026-08-11');
+  const [months, setMonths] = useState(12);
 
-  // Mock datasets configured per time tab
-  const dataMap: Record<TimeRange, AnalyticsPayload> = {
-    today: {
-      sales: 18400,
-      revenue: 1840,
-      profit: 1420,
-      growth: 2.4,
-      labels: ['09:00', '12:00', '15:00', '18:00', '21:00'],
-      profitPoints: 'M 0 160 Q 80 120 160 140 T 320 80 T 480 30 Z',
-      periodSales: [2500, 4800, 3100, 5200, 2800]
-    },
-    week: {
-      sales: 92600,
-      revenue: 9260,
-      profit: 7150,
-      growth: 6.8,
-      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      profitPoints: 'M 0 140 Q 80 90 160 110 T 320 100 T 480 60 T 640 20 Z',
-      periodSales: [12000, 15000, 11000, 16500, 14000, 9500, 14600]
-    },
-    month: {
-      sales: 410200,
-      revenue: 41020,
-      profit: 31850,
-      growth: 12.2,
-      labels: ['Wk 1', 'Wk 2', 'Wk 3', 'Wk 4'],
-      profitPoints: 'M 0 120 Q 80 150 160 110 T 320 60 T 480 15 Z',
-      periodSales: [92000, 112000, 101000, 105200]
-    },
-    year: {
-      sales: 4920000,
-      revenue: 492000,
-      profit: 378000,
-      growth: 24.5,
-      labels: ['Q1', 'Q2', 'Q3', 'Q4'],
-      profitPoints: 'M 0 150 Q 80 110 160 80 T 320 40 T 480 10 Z',
-      periodSales: [1100000, 1250000, 1180000, 1390000]
-    },
-    custom: {
-      sales: 150000,
-      revenue: 15000,
-      profit: 11500,
-      growth: 5.1,
-      labels: ['Start', 'Mid', 'End'],
-      profitPoints: 'M 0 130 Q 80 140 160 100 T 320 50 T 480 25 Z',
-      periodSales: [45000, 52000, 53000]
+  const dashboard = useApi((token) => getSuperAdminDashboard(token), []);
+  const revenue = useApi((token) => getRevenueSeries(token, months), [months]);
+  const orders = useApi((token) => listOrders(token, { limit: 100 }), []);
+  const sellers = useApi((token) => listOrganisations(token, { kind: 'seller', limit: 100 }), []);
+
+  const series = useMemo(() => revenue.data ?? [], [revenue.data]);
+  const tradeTrend = useMemo(() => series.map((point) => ({
+    label: formatDate(point.period).slice(0, 6),
+    value: point.gmvMinor,
+    detail: formatMinor(point.gmvMinor)
+  })), [series]);
+
+  const mix = useMemo(() => {
+    const rows = orders.data?.items ?? [];
+    const counts = new Map<string, number>();
+    for (const o of rows) counts.set(o.status, (counts.get(o.status) ?? 0) + 1);
+    const total = rows.length || 1;
+    return [...counts.entries()]
+      .map(([status, count]) => ({ status, count, share: (count / total) * 100 }))
+      .sort((a, b) => b.count - a.count);
+  }, [orders.data]);
+
+  const verification = useMemo(() => {
+    const rows = sellers.data?.items ?? [];
+    const counts = new Map<string, number>();
+    for (const o of rows) counts.set(o.verificationStatus, (counts.get(o.verificationStatus) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [sellers.data]);
+
+  const columns: Column<RevenuePoint>[] = [
+    { key: 'period', label: 'Month', render: (row) => formatDate(row.period) },
+    { key: 'orderCount', label: 'Orders', align: 'center' },
+    { key: 'buyerCount', label: 'Active buyers', align: 'center' },
+    { key: 'sellerCount', label: 'Active sellers', align: 'center' },
+    { key: 'gmvMinor', label: 'Trade', align: 'right', render: (row) => formatMinor(row.gmvMinor) },
+    {
+      key: 'average',
+      label: 'Average order',
+      align: 'right',
+      render: (row) => formatMinor(row.orderCount === 0 ? 0 : Math.round(row.gmvMinor / row.orderCount))
     }
-  };
+  ];
 
-  const activeData = dataMap[selectedRange];
+  const m = dashboard.data;
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
         title="Platform Analytics"
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Analytics', href: '/platform-analytics' }, { label: 'Platform' }]}
+        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Platform Analytics' }]}
+        action={
+          <select
+            value={months}
+            onChange={(e) => setMonths(Number(e.target.value))}
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground"
+          >
+            <option value={3}>Last 3 months</option>
+            <option value={6}>Last 6 months</option>
+            <option value={12}>Last 12 months</option>
+          </select>
+        }
       />
 
-      {/* Tabs navigation list */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/80 pb-1">
-        <div className="flex gap-1.5">
-          {(['today', 'week', 'month', 'year', 'custom'] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => setSelectedRange(range)}
-              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                selectedRange === range
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'bg-card border border-border/80 hover:bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {range.toUpperCase()}
-            </button>
-          ))}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard title="Active users" value={m?.activeUsers ?? '—'} icon={Users} />
+        <StatCard title="Verified companies" value={m?.verifiedCompanies ?? '—'} icon={Building2} />
+        <StatCard title="Active listings" value={m?.activeListings ?? '—'} icon={Activity} />
+        <StatCard title="Orders" value={m?.orderCount ?? '—'} icon={ShoppingCart} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Order status mix</h3>
+          {orders.loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <DistributionChart
+              ariaLabel="Order status distribution"
+              emptyLabel="No orders yet."
+              items={mix.map((row) => ({
+                label: row.status.replace(/_/g, ' '),
+                value: row.count,
+                detail: `${row.count} · ${row.share.toFixed(0)}%`,
+                tone: row.status === 'cancelled' ? 'danger' : undefined
+              }))}
+            />
+          )}
         </div>
 
-        {/* Custom Range picker inputs */}
-        {selectedRange === 'custom' && (
-          <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2 duration-150">
-            <div className="relative">
-              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="pl-8 pr-2 py-1 text-xs border border-border bg-card rounded-md focus:outline-none"
-              />
-            </div>
-            <span className="text-xs text-muted-foreground font-semibold">to</span>
-            <div className="relative">
-              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="pl-8 pr-2 py-1 text-xs border border-border bg-card rounded-md focus:outline-none"
-              />
-            </div>
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Seller verification</h3>
+          {sellers.loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <DistributionChart
+              ariaLabel="Seller verification distribution"
+              items={verification.map(([status, count]) => ({
+                label: status,
+                value: count,
+                tone: status === 'rejected' || status === 'expired' ? 'danger' : status === 'pending' ? 'secondary' : undefined
+              }))}
+            />
+          )}
+          <div className="space-y-2 border-t border-border pt-3 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">Pending verifications</span><span className="font-semibold text-foreground">{m?.pendingVerifications ?? '—'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Open disputes</span><span className="font-semibold text-foreground">{m?.openDisputes ?? '—'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Open returns</span><span className="font-semibold text-foreground">{m?.openReturns ?? '—'}</span></div>
           </div>
+        </div>
+      </div>
+
+      <section className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm" aria-labelledby="trade-by-month">
+        <div>
+          <h3 id="trade-by-month" className="text-base font-bold text-foreground">Trade by month</h3>
+          <p className="text-xs text-muted-foreground">The direction of platform sales before the detailed monthly figures.</p>
+        </div>
+        {revenue.loading ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">Loading trade trend…</p>
+        ) : revenue.error ? (
+          <p className="py-10 text-center text-sm text-destructive">{revenue.error}</p>
+        ) : (
+          <TrendChart
+            points={tradeTrend}
+            valueLabel="GMV"
+            valueFormatter={(value) => formatMinor(value)}
+            ariaLabel="Monthly platform gross merchandise value"
+          />
         )}
-      </div>
+      </section>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <FinancialSummaryCard label="Total Sales (GMV)" amount={activeData.sales} variant="info" />
-        <FinancialSummaryCard label="Platform Revenue" amount={activeData.revenue} variant="success" />
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm flex flex-col justify-between">
-          <div>
-            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Net Platform Profit</p>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-2xl font-black text-foreground font-mono">
-                ${activeData.profit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-              <PercentageBadge value={activeData.growth} type="growth" />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 font-medium">
-            Margin growth compared to prior timeline block
-          </p>
-        </div>
-      </div>
-
-      {/* Visual Trends Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Net Profit Trend Area Graph (SVG Line) */}
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h3 className="text-sm font-bold text-foreground">Net Profit Trend Margin</h3>
-              <p className="text-xs text-muted-foreground">Earnings performance velocity for the selected timeline</p>
-            </div>
-            <div className="p-1.5 bg-info/10 text-info border border-info/20 rounded">
-              <TrendingUp className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          <div className="h-48 relative border-b border-l border-border/80 mt-2">
-            <div className="absolute inset-0 flex flex-col justify-between py-2 pointer-events-none opacity-20">
-              <div className="border-t border-foreground w-full" />
-              <div className="border-t border-foreground w-full" />
-            </div>
-            <svg className="w-full h-full overflow-visible" preserveAspectRatio="none">
-              <path
-                d={activeData.profitPoints}
-                fill="none"
-                stroke="hsl(var(--info))"
-                strokeWidth="3.5"
-              />
-            </svg>
-          </div>
-          <div className="flex justify-between text-[10px] text-muted-foreground font-bold font-mono px-1">
-            {activeData.labels.map((lbl, idx) => (
-              <span key={idx}>{lbl}</span>
-            ))}
-          </div>
-        </div>
-
-        {/* Bar Chart comparing periods (SVG vertical comparative bars) */}
-        <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h3 className="text-sm font-bold text-foreground">Sales Volumes Contrast</h3>
-              <p className="text-xs text-muted-foreground">Comparative Sales (GMV) splits across periods</p>
-            </div>
-            <div className="p-1.5 bg-primary/10 text-primary border border-primary/20 rounded">
-              <BarChart2 className="h-4.5 w-4.5" />
-            </div>
-          </div>
-          
-          <div className="h-48 flex items-end justify-around gap-6 pt-6 border-b border-l border-border/80">
-            {activeData.periodSales.map((salesVal, idx) => {
-              const maxVal = Math.max(...activeData.periodSales);
-              const pct = maxVal > 0 ? (salesVal / maxVal) * 80 : 0; // capped at 80% height
-              return (
-                <div key={idx} className="flex-1 flex flex-col items-center gap-2">
-                  <span className="text-[9px] font-bold text-foreground font-mono">
-                    ${salesVal >= 1000000 ? `${(salesVal/1000000).toFixed(1)}M` : `${(salesVal/1000).toFixed(0)}k`}
-                  </span>
-                  <div
-                    className="bg-primary hover:bg-primary/95 w-full rounded-t-md transition-all duration-300 relative group cursor-pointer"
-                    style={{ height: `${pct}%`, minHeight: '6px' }}
-                  >
-                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-popover border border-border rounded text-[9px] font-bold px-1.5 py-0.5 shadow-md hidden group-hover:block whitespace-nowrap z-20">
-                      GMV: ${salesVal.toLocaleString()}
-                    </div>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground font-semibold">
-                    {activeData.labels[idx]}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
+      <div className="space-y-3">
+        <h3 className="px-1 text-base font-bold text-foreground">Monthly figures</h3>
+        <DataTable
+          columns={columns}
+          data={series}
+          isLoading={revenue.loading}
+          error={revenue.error}
+          onRetry={revenue.reload}
+        />
       </div>
     </div>
   );

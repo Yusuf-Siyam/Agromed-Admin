@@ -1,197 +1,118 @@
-import { useState } from 'react';
-import { CreditCard, Calendar, RefreshCw } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { CreditCard, RefreshCw } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
 import StatusBadge from '@/components/shared/StatusBadge';
 import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
-import StatCard from '@/components/shared/StatCard';
-import PercentageBadge from '@/components/shared/PercentageBadge';
-
-interface SalesTransaction {
-  id: string;
-  date: string;
-  company: string;
-  value: number;
-  commissionRate: number;
-  platformEarning: number;
-  status: string;
-}
+import { useApi } from '@/lib/useApi';
+import { formatDate, formatMinor, listOrders } from '@/lib/superadmin-api';
+import type { AdminOrder } from '@/lib/superadmin-api';
 
 export default function SalesTransactions() {
-  // Mock data of platform-wide transactions (view-only)
-  const mockTransactions: SalesTransaction[] = [
-    { id: 'TXN-9041', date: '2026-08-11', company: 'Acme Agritech Solutions', value: 1200.00, commissionRate: 10.0, platformEarning: 120.00, status: 'completed' },
-    { id: 'TXN-9040', date: '2026-08-11', company: 'Bayer CropScience BD', value: 780.00, commissionRate: 10.0, platformEarning: 78.00, status: 'completed' },
-    { id: 'TXN-9039', date: '2026-08-10', company: 'Greenfield Agro Ltd.', value: 4500.00, commissionRate: 8.0, platformEarning: 360.00, status: 'completed' },
-    { id: 'TXN-9038', date: '2026-08-09', company: 'Sufala Fertilizer Co.', value: 2400.00, commissionRate: 10.0, platformEarning: 240.00, status: 'completed' },
-    { id: 'TXN-9037', date: '2026-08-08', company: 'Organic Roots BD', value: 950.00, commissionRate: 10.0, platformEarning: 95.00, status: 'completed' },
-    { id: 'TXN-9036', date: '2026-08-05', company: 'Teesta Seed Distributors', value: 1800.00, commissionRate: 10.0, platformEarning: 180.00, status: 'completed' },
-    { id: 'TXN-9035', date: '2026-08-03', company: 'Greenfield Agro Ltd.', value: 3200.00, commissionRate: 8.0, platformEarning: 256.00, status: 'completed' },
-    { id: 'TXN-9034', date: '2026-08-01', company: 'Acme Agritech Solutions', value: 650.00, commissionRate: 10.0, platformEarning: 65.00, status: 'pending' }
-  ];
-
-  // Filters State
-  const [startDate, setStartDate] = useState('2026-08-01');
-  const [endDate, setEndDate] = useState('2026-08-11');
-  const [companyFilter, setCompanyFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('all');
 
-  // Reset Filters
-  const handleResetFilters = () => {
-    setStartDate('2026-08-01');
-    setEndDate('2026-08-11');
-    setCompanyFilter('all');
-    setSearch('');
-  };
+  const orders = useApi((token) => listOrders(token, { search: search || undefined, limit: 100 }), [search]);
+  const all = useMemo(() => orders.data?.items ?? [], [orders.data]);
 
-  // Perform Filtering
-  const filteredTxns = mockTransactions.filter((txn) => {
-    const matchCompany = companyFilter === 'all' || txn.company === companyFilter;
-    const matchSearch =
-      txn.id.toLowerCase().includes(search.toLowerCase()) ||
-      txn.company.toLowerCase().includes(search.toLowerCase());
-    const matchDate = txn.date >= startDate && txn.date <= endDate;
-    return matchCompany && matchSearch && matchDate;
-  });
+  const companies = useMemo(
+    () => [...new Set(all.map((o) => o.sellerName))].sort(),
+    [all]
+  );
 
-  // Calculate Metrics based on filtered items
-  const totalSales = filteredTxns.reduce((acc, curr) => acc + curr.value, 0);
-  const totalEarnings = filteredTxns.reduce((acc, curr) => acc + curr.platformEarning, 0);
-  const txnPercent = filteredTxns.length > 0 ? (totalEarnings / totalSales) * 100 : 0;
+  const rows = useMemo(
+    () => companyFilter === 'all' ? all : all.filter((o) => o.sellerName === companyFilter),
+    [all, companyFilter]
+  );
 
-  const columns: Column<SalesTransaction>[] = [
-    { key: 'date', label: 'Transaction Date', sortable: true },
-    { key: 'id', label: 'Txn ID' },
+  const totals = useMemo(() => {
+    const traded = rows.filter((o) => !['cancelled', 'pending_payment'].includes(o.status));
+    const value = traded.reduce((t, o) => t + o.grandTotalMinor, 0);
+    const earning = traded.reduce((t, o) => t + o.commissionMinor, 0);
+    return {
+      value,
+      earning,
+      count: traded.length,
+      rate: value === 0 ? null : (earning / value) * 100,
+      currency: rows[0]?.currency ?? 'BDT'
+    };
+  }, [rows]);
+
+  const columns: Column<AdminOrder>[] = [
+    { key: 'orderNumber', label: 'Order' },
+    { key: 'placedAt', label: 'Date', render: (row) => formatDate(row.placedAt) },
+    { key: 'sellerName', label: 'Company' },
     {
-      key: 'company',
-      label: 'Agro Company',
-      sortable: true,
-      render: (row) => <span className="font-bold text-foreground">{row.company}</span>
-    },
-    {
-      key: 'value',
-      label: 'Transaction Value (GMV)',
+      key: 'grandTotalMinor',
+      label: 'Order value',
       align: 'right',
-      sortable: true,
-      render: (row) => `$${row.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.grandTotalMinor, row.currency)}</span>
     },
     {
-      key: 'commissionRate',
-      label: 'Commission Cut',
-      align: 'center',
-      render: (row) => <PercentageBadge value={row.commissionRate} type="commission" />
-    },
-    {
-      key: 'platformEarning',
-      label: 'Platform Earnings',
+      key: 'rate',
+      label: 'Effective rate',
       align: 'right',
-      sortable: true,
-      render: (row) => `$${row.platformEarning.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+      render: (row) => (
+        <span className="text-muted-foreground">
+          {row.grandTotalMinor === 0 ? '—' : `${((row.commissionMinor / row.grandTotalMinor) * 100).toFixed(2)}%`}
+        </span>
+      )
     },
     {
-      key: 'status',
-      label: 'Status',
-      render: (row) => <StatusBadge status={row.status} />
-    }
+      key: 'commissionMinor',
+      label: 'Platform earning',
+      align: 'right',
+      render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.commissionMinor, row.currency)}</span>
+    },
+    { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status} /> }
   ];
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
         title="Sales Transactions"
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Financial', href: '/sales' }, { label: 'Sales' }]}
+        breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Sales', href: '/sales' }, { label: 'Transactions' }]}
         action={
           <button
-            onClick={handleResetFilters}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-border bg-card hover:bg-muted text-foreground text-xs font-bold rounded-lg shadow-sm transition-colors cursor-pointer"
+            onClick={orders.reload}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold hover:bg-muted"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Reset Filters
+            <RefreshCw className="h-3.5 w-3.5" />Refresh
           </button>
         }
       />
 
-      {/* Summary KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <FinancialSummaryCard
-          label="Total Sales (GMV)"
-          amount={totalSales}
-          subtext={`Cumulative sales value for filtered period`}
-          variant="info"
-        />
-        <StatCard
-          title="Number of Transactions"
-          value={filteredTxns.length}
-          icon={CreditCard}
-        />
-        <FinancialSummaryCard
-          label="Platform Revenue Share"
-          amount={totalEarnings}
-          subtext={`Avg. cut: ${txnPercent.toFixed(1)}%`}
-          variant="success"
-        />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <FinancialSummaryCard label="Traded value" amount={formatMinor(totals.value, totals.currency)} variant="info" />
+        <FinancialSummaryCard label="Platform earning" amount={formatMinor(totals.earning, totals.currency)} variant="success" />
+        <FinancialSummaryCard label="Transactions" amount={String(totals.count)} />
+        <FinancialSummaryCard label="Effective rate" amount={totals.rate == null ? '—' : `${totals.rate.toFixed(2)}%`} />
       </div>
 
-      {/* Filters workspace bar */}
-      <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-        <h3 className="text-xs font-bold text-foreground tracking-wide uppercase">Transaction Search & Date Filters</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase">Start Date</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase">End Date</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase">Filter by Company</label>
+      <DataTable
+        columns={columns}
+        data={rows}
+        isLoading={orders.loading}
+        error={orders.error}
+        onRetry={orders.reload}
+        searchPlaceholder="Search order number, company or buyer..."
+        searchValue={search}
+        onSearchChange={setSearch}
+        filterSlot={
+          <div className="flex items-center gap-1.5">
+            <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
             <select
               value={companyFilter}
               onChange={(e) => setCompanyFilter(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
             >
-              <option value="all">All Companies</option>
-              <option value="Acme Agritech Solutions">Acme Agritech Solutions</option>
-              <option value="Bayer CropScience BD">Bayer CropScience BD</option>
-              <option value="Greenfield Agro Ltd.">Greenfield Agro Ltd.</option>
-              <option value="Sufala Fertilizer Co.">Sufala Fertilizer Co.</option>
-              <option value="Organic Roots BD">Organic Roots BD</option>
-              <option value="Teesta Seed Distributors">Teesta Seed Distributors</option>
+              <option value="all">All companies</option>
+              {companies.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Transactions list DataTable */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-bold text-foreground px-1">Audited Transactions Ledger</h3>
-        <DataTable
-          columns={columns}
-          data={filteredTxns}
-          searchPlaceholder="Search transactions by ID or company..."
-          searchValue={search}
-          onSearchChange={setSearch}
-        />
-      </div>
+        }
+      />
     </div>
   );
 }

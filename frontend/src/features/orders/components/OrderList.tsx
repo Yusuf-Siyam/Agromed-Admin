@@ -5,55 +5,84 @@ import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
 import StatusBadge from '@/components/shared/StatusBadge';
-import { mockOrders } from '@/mock-data/orders';
-import type { OrderItem } from '@/mock-data/orders';
+import { useApi } from '@/lib/useApi';
+import { sortRows } from '@/lib/table';
+import { formatDate, formatMinor, listOrders } from '@/lib/superadmin-api';
+import type { AdminOrder } from '@/lib/superadmin-api';
 import { cn } from '@/lib/utils';
 
-type ActiveTab = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+const TABS = [
+  { label: 'All', id: '' },
+  { label: 'Awaiting payment', id: 'pending_payment' },
+  { label: 'Confirmed', id: 'confirmed' },
+  { label: 'Processing', id: 'processing' },
+  { label: 'Shipped', id: 'shipped' },
+  { label: 'Delivered', id: 'delivered' },
+  { label: 'Completed', id: 'completed' },
+  { label: 'Cancelled', id: 'cancelled' }
+] as const;
 
 export default function OrderList() {
   const navigate = useNavigate();
 
-  // Search & Tab States
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
-
-  const [sortKey, setSortKey] = useState<string>('date');
+  const [activeTab, setActiveTab] = useState<string>('');
+  const [sortKey, setSortKey] = useState<string>('placedAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
-  const columns: Column<OrderItem>[] = [
-    { key: 'id', label: 'Order ID', sortable: true },
+  const orders = useApi(
+    (token) => listOrders(token, {
+      status: activeTab || undefined,
+      search: search || undefined,
+      limit: 100
+    }),
+    [search, activeTab]
+  );
+
+  const rows = sortRows(orders.data?.items ?? [], sortKey, sortDirection);
+
+  const columns: Column<AdminOrder>[] = [
+    { key: 'orderNumber', label: 'Order', sortable: true },
     {
-      key: 'farmerName',
-      label: 'Farmer Customer',
+      key: 'buyerName',
+      label: 'Buyer',
       sortable: true,
       render: (row) => (
         <div className="flex flex-col">
-          <span className="font-semibold text-foreground">{row.farmerName}</span>
-          <span className="text-xs text-muted-foreground">{row.farmerPhone}</span>
+          <span className="font-semibold text-foreground">{row.buyerContactName ?? row.buyerName}</span>
+          <span className="text-xs text-muted-foreground">{row.buyerPhone ?? row.buyerName}</span>
         </div>
       )
     },
-    { key: 'companyName', label: 'Agro Company', sortable: true },
+    { key: 'sellerName', label: 'Agro Company', sortable: true },
     {
-      key: 'total',
-      label: 'Total Total',
-      align: 'center',
+      key: 'grandTotalMinor',
+      label: 'Order Value',
+      align: 'right',
       sortable: true,
-      render: (row) => <span className="font-semibold">${row.total.toFixed(2)}</span>
+      render: (row) => <span className="font-semibold">{formatMinor(row.grandTotalMinor, row.currency)}</span>
     },
-    { key: 'date', label: 'Order Date', sortable: true },
+    {
+      key: 'commissionMinor',
+      label: 'Commission',
+      align: 'right',
+      sortable: true,
+      render: (row) => <span className="text-muted-foreground">{formatMinor(row.commissionMinor, row.currency)}</span>
+    },
+    { key: 'placedAt', label: 'Placed', sortable: true, render: (row) => formatDate(row.placedAt) },
     {
       key: 'paymentStatus',
       label: 'Payment',
       sortable: true,
-      render: (row) => <StatusBadge status={row.paymentStatus} />
+      render: (row) => row.paymentStatus
+        ? <StatusBadge status={row.paymentStatus} />
+        : <span className="text-xs text-muted-foreground">No payment</span>
     },
     {
-      key: 'deliveryStatus',
-      label: 'Delivery Status',
+      key: 'status',
+      label: 'Fulfilment',
       sortable: true,
-      render: (row) => <StatusBadge status={row.deliveryStatus} />
+      render: (row) => <StatusBadge status={row.status} />
     },
     {
       key: 'actions',
@@ -73,55 +102,14 @@ export default function OrderList() {
     }
   ];
 
-  const handleSortChange = (key: string, direction: 'asc' | 'desc') => {
-    setSortKey(key);
-    setSortDirection(direction);
-  };
-
-  const filteredOrders = mockOrders
-    .filter((ord) => {
-      const matchSearch =
-        ord.id.toLowerCase().includes(search.toLowerCase()) ||
-        ord.farmerName.toLowerCase().includes(search.toLowerCase()) ||
-        ord.companyName.toLowerCase().includes(search.toLowerCase());
-
-      const matchTab = activeTab === 'all' || ord.deliveryStatus === activeTab || ord.paymentStatus === activeTab;
-      return matchSearch && matchTab;
-    })
-    .sort((a, b) => {
-      let aVal = (a as any)[sortKey];
-      let bVal = (b as any)[sortKey];
-
-      if (typeof aVal === 'string') {
-        aVal = aVal.toLowerCase();
-        bVal = bVal.toLowerCase();
-      }
-
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-  const tabList: { label: string; id: ActiveTab }[] = [
-    { label: 'All Orders', id: 'all' },
-    { label: 'Pending', id: 'pending' },
-    { label: 'Processing', id: 'processing' },
-    { label: 'Shipped', id: 'shipped' },
-    { label: 'Delivered', id: 'delivered' },
-    { label: 'Cancelled', id: 'cancelled' },
-    { label: 'Refunded', id: 'refunded' }
-  ];
-
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader title="Order Log Management" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Orders' }]} />
 
-      {/* Navigation tabs */}
       <div className="flex border-b border-border/60 bg-card rounded-t-xl overflow-x-auto scrollbar-none shrink-0 shadow-sm">
-        {tabList.map((tab) => (
+        {TABS.map((tab) => (
           <button
-            key={tab.id}
+            key={tab.id || 'all'}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
               'px-5 py-3.5 text-xs font-bold text-center border-b-2 transition-all cursor-pointer whitespace-nowrap',
@@ -135,16 +123,18 @@ export default function OrderList() {
         ))}
       </div>
 
-      {/* Orders Table */}
       <DataTable
         columns={columns}
-        data={filteredOrders}
-        searchPlaceholder="Search order ID, farmer, supplier..."
+        data={rows}
+        isLoading={orders.loading}
+        error={orders.error}
+        onRetry={orders.reload}
+        searchPlaceholder="Search order number, buyer or company..."
         searchValue={search}
         onSearchChange={setSearch}
         sortKey={sortKey}
         sortDirection={sortDirection}
-        onSortChange={handleSortChange}
+        onSortChange={(key, direction) => { setSortKey(key); setSortDirection(direction); }}
       />
     </div>
   );

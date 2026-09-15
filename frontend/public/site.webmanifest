@@ -1,0 +1,16 @@
+{
+  "name": "AgroMedConnect",
+  "short_name": "AgroMedConnect",
+  "icons": [
+    {
+      "src": "./agromedconnect-favicon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "./favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

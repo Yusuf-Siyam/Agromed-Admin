@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useApi } from '@/lib/useApi';
+import { avatarUrl, formatDate, getCurrentUser, listBroadcasts } from '@/lib/superadmin-api';
 import {
   LayoutDashboard,
   Building2,
-  Sprout,
   Wrench,
   CreditCard,
   TrendingUp,
@@ -18,7 +19,6 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  Search,
   ChevronDown,
   Sun,
   Moon,
@@ -29,9 +29,17 @@ import {
   ArrowDownRight,
   Tag,
   Activity,
-  ClipboardList
+  ClipboardList,
+  SlidersHorizontal,
+  Package,
+  ShoppingCart,
+  Users,
+  FolderTree,
+  Wallet,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import BrandLogo from '@/components/shared/BrandLogo';
+import { useSuperAdminSession } from '@/features/auth/SuperAdminSession';
 import { useToast } from '@/components/shared/Toast';
 import { cn } from '@/lib/utils';
 
@@ -64,8 +72,23 @@ const navSections: NavSection[] = [
   {
     title: 'Stakeholders',
     items: [
-      { label: 'Farmers', path: '/farmers', icon: Sprout },
+      { label: 'Buyers & Farmers', path: '/buyers', icon: Users },
       { label: 'Service Providers', path: '/service-providers', icon: Briefcase }
+    ]
+  },
+  {
+    title: 'Commerce',
+    items: [
+      { label: 'Orders', path: '/orders', icon: ShoppingCart },
+      { label: 'Payments', path: '/payments', icon: Wallet }
+    ]
+  },
+  {
+    title: 'Catalogue',
+    items: [
+      { label: 'Products', path: '/products', icon: Package },
+      { label: 'Categories', path: '/categories', icon: FolderTree },
+      { label: 'Services', path: '/services', icon: Wrench }
     ]
   },
   {
@@ -90,7 +113,6 @@ const navSections: NavSection[] = [
   {
     title: '',
     items: [
-      { label: 'Services', path: '/services', icon: Wrench },
       { label: 'Reviews', path: '/reviews', icon: MessageSquare },
       { label: 'Notifications', path: '/notifications', icon: Bell }
     ]
@@ -98,6 +120,7 @@ const navSections: NavSection[] = [
   {
     title: '',
     items: [
+      { label: 'Platform Controls', path: '/platform-controls', icon: SlidersHorizontal },
       { label: 'Settings', path: '/settings', icon: Settings },
       { label: 'Profile', path: '/profile', icon: User }
     ]
@@ -108,8 +131,8 @@ export default function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { success } = useToast();
+  const { logout } = useSuperAdminSession();
 
-  // Layout States
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -117,18 +140,15 @@ export default function DashboardLayout() {
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
-  // Dropdown Refs for Click Outside Close
   const profileRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
 
-  // Auto-close drawers on path changes
   useEffect(() => {
     setIsMobileOpen(false);
     setIsProfileOpen(false);
     setIsNotificationsOpen(false);
   }, [location.pathname]);
 
-  // Click Outside to Close Dropdowns
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
@@ -142,46 +162,49 @@ export default function DashboardLayout() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Theme Toggle Handler
   const toggleTheme = () => {
     setDarkMode(!darkMode);
     document.documentElement.classList.toggle('dark');
   };
 
-  // Logout Handler
-  const handleLogoutConfirm = () => {
+  const handleLogoutConfirm = async () => {
     setIsLogoutDialogOpen(false);
+    await logout();
     success('Logged out successfully');
     navigate('/auth/login');
   };
 
-  // Dummy Notifications
-  const dummyNotifications = [
-    { id: 1, text: 'New farmer registered: Rahman S.', time: '5m ago' },
-    { id: 2, text: 'Payment verification pending ($1,240)', time: '1h ago' },
-    { id: 3, text: 'Low stock warning: Urea Fertilizer', time: '3h ago' }
-  ];
+  const broadcasts = useApi((token) => listBroadcasts(token, 5), []);
+
+  const me = useApi((token) => getCurrentUser(token), []);
+  const myName = me.data?.fullName ?? '—';
+  const myInitials = me.data ? me.data.fullName.slice(0, 2).toUpperCase() : '';
+  const myRole = me.data?.roles?.[0]?.replace(/_/g, ' ') ?? 'Administrator';
+  const notifications = broadcasts.data ?? [];
 
   return (
     <div className="flex h-screen w-screen bg-background overflow-hidden font-sans">
-      {/* 1. SIDEBAR (Desktop) */}
+      { }
       <aside
         className={cn(
-          'hidden md:flex flex-col bg-primary text-primary-foreground border-r border-border/10 relative transition-all duration-300 z-30 shrink-0',
+          'dashboard-sidebar hidden md:flex flex-col text-primary-foreground border-r border-border/10 relative transition-all duration-300 z-30 shrink-0',
           isCollapsed ? 'w-20' : 'w-64'
         )}
       >
-        {/* Sidebar Header */}
-        <div className="h-16 flex items-center px-6 border-b border-white/5 shrink-0 justify-between">
+        { }
+        <div className="h-16 flex items-center px-5 border-b border-white/10 shrink-0 justify-between">
           <div className={cn('flex items-center gap-2 overflow-hidden transition-all', isCollapsed && 'opacity-0 scale-95 w-0')}>
-            <span className="font-bold text-lg tracking-tight whitespace-nowrap">AgroMED Connect</span>
+            <BrandLogo className="h-9 w-9" />
+            <div className="leading-tight whitespace-nowrap">
+              <span className="block font-bold text-[15px] tracking-tight">AgroMedConnect</span>
+            </div>
           </div>
           {isCollapsed && (
-            <span className="font-bold text-lg tracking-tight mx-auto">AM</span>
+            <BrandLogo title="AgroMedConnect" className="mx-auto h-9 w-9" />
           )}
         </div>
 
-        {/* Sidebar Navigation */}
+        { }
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6 scrollbar-thin scrollbar-thumb-white/10">
           {navSections.map((sec, idx) => (
             <div key={idx} className="space-y-1">
@@ -195,6 +218,7 @@ export default function DashboardLayout() {
                   <NavLink
                     key={item.path}
                     to={item.path}
+                    end={item.path === '/companies'}
                     className={({ isActive }) =>
                       cn(
                         'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all group relative cursor-pointer',
@@ -218,7 +242,7 @@ export default function DashboardLayout() {
           ))}
         </nav>
 
-        {/* Sidebar Footer */}
+        { }
         <div className="p-3 border-t border-white/5 shrink-0">
           <button
             onClick={() => setIsLogoutDialogOpen(true)}
@@ -229,7 +253,7 @@ export default function DashboardLayout() {
           </button>
         </div>
 
-        {/* Sidebar Collapse Toggle Trigger */}
+        { }
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="absolute top-16 -right-3.5 bg-primary border border-white/10 hover:bg-primary/95 text-primary-foreground rounded-full p-1 shadow-md cursor-pointer flex items-center justify-center z-50"
@@ -238,19 +262,24 @@ export default function DashboardLayout() {
         </button>
       </aside>
 
-      {/* 2. MOBILE DRAWER SIDEBAR */}
+      { }
       {isMobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex">
-          {/* Backdrop Overlay */}
+          { }
           <div
             className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity"
             onClick={() => setIsMobileOpen(false)}
           />
 
-          {/* Drawer Content */}
-          <aside className="relative flex flex-col w-64 max-w-xs bg-primary text-primary-foreground border-r border-white/10 z-10 animate-in slide-in-from-left duration-250">
-            <div className="h-16 flex items-center justify-between px-6 border-b border-white/5">
-              <span className="font-bold text-lg">AgroMED Connect</span>
+          { }
+          <aside className="dashboard-sidebar relative flex flex-col w-64 max-w-xs text-primary-foreground border-r border-white/10 z-10 animate-in slide-in-from-left duration-250">
+            <div className="h-16 flex items-center justify-between px-5 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <BrandLogo className="h-9 w-9" />
+                <div className="leading-tight">
+                  <span className="block font-bold text-[15px] tracking-tight">AgroMedConnect</span>
+                </div>
+              </div>
               <button onClick={() => setIsMobileOpen(false)} className="text-white/70 hover:text-white">
                 <X className="h-5 w-5" />
               </button>
@@ -269,6 +298,7 @@ export default function DashboardLayout() {
                       <NavLink
                         key={item.path}
                         to={item.path}
+                        end={item.path === '/companies'}
                         className={({ isActive }) =>
                           cn(
                             'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer',
@@ -300,12 +330,12 @@ export default function DashboardLayout() {
         </div>
       )}
 
-      {/* 3. MAIN WORKSPACE CONTAINER */}
+      { }
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Top Navbar */}
-        <header className="h-16 border-b border-border/80 bg-card flex items-center justify-between px-4 md:px-6 shrink-0 relative z-20 shadow-sm">
-          {/* Hamburger Menu & Search */}
-          <div className="flex items-center gap-4 flex-1">
+        { }
+        <header className="h-16 border-b border-border/80 bg-card/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 shrink-0 relative z-20 shadow-sm">
+          { }
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileOpen(true)}
               className="md:hidden text-muted-foreground hover:text-foreground cursor-pointer"
@@ -313,20 +343,15 @@ export default function DashboardLayout() {
               <Menu className="h-6 w-6" />
             </button>
 
-            {/* Global Search Bar Placeholder */}
-            <div className="relative flex-1 max-w-xs md:max-w-sm hidden sm:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/80" />
-              <input
-                type="text"
-                placeholder="Search..."
-                className="w-full pl-9 pr-4 py-1.5 text-xs md:text-sm border border-border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-shadow"
-              />
+            <div className="flex items-center gap-2">
+              <BrandLogo className="h-8 w-8" />
+              <span className="text-sm font-bold tracking-tight text-foreground md:hidden">AgroMedConnect</span>
             </div>
           </div>
 
-          {/* Action icons */}
+          { }
           <div className="flex items-center gap-3 md:gap-4.5">
-            {/* Theme Toggle */}
+            { }
             <button
               onClick={toggleTheme}
               className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors cursor-pointer"
@@ -335,7 +360,7 @@ export default function DashboardLayout() {
               {darkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
 
-            {/* Messages Icon */}
+            { }
             <button
               onClick={() => navigate('/reviews')}
               className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors relative cursor-pointer"
@@ -345,7 +370,7 @@ export default function DashboardLayout() {
               <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-accent border border-card" />
             </button>
 
-            {/* Notifications Popover */}
+            { }
             <div className="relative" ref={notificationsRef}>
               <button
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
@@ -358,7 +383,7 @@ export default function DashboardLayout() {
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-secondary border border-card" />
               </button>
 
-              {/* Slide-down notifications menu */}
+              { }
               {isNotificationsOpen && (
                 <div className="absolute right-0 mt-2.5 w-72 bg-card border border-border/80 rounded-xl shadow-lg py-2 z-50 animate-in fade-in slide-in-from-top-3 duration-200">
                   <div className="px-4 py-2 border-b border-border/60 flex items-center justify-between">
@@ -366,10 +391,16 @@ export default function DashboardLayout() {
                     <span className="text-[10px] text-info font-semibold cursor-pointer hover:underline">Mark all read</span>
                   </div>
                   <div className="divide-y divide-border/40 max-h-64 overflow-y-auto">
-                    {dummyNotifications.map((notif) => (
-                      <div key={notif.id} className="px-4 py-3 hover:bg-muted/40 transition-colors flex flex-col gap-1 cursor-pointer">
-                        <p className="text-xs text-foreground/80 font-medium leading-normal">{notif.text}</p>
-                        <span className="text-[10px] text-muted-foreground">{notif.time}</span>
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                        {broadcasts.loading ? 'Loading…' : 'No broadcasts sent yet.'}
+                      </p>
+                    ) : notifications.map((notif) => (
+                      <div key={notif.eventId} className="px-4 py-3 hover:bg-muted/40 transition-colors flex flex-col gap-1 cursor-pointer">
+                        <p className="text-xs text-foreground/80 font-medium leading-normal">{notif.title}</p>
+                        <span className="text-[10px] text-muted-foreground">
+                          {formatDate(notif.createdAt)} · {notif.recipientCount} recipients
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -385,31 +416,40 @@ export default function DashboardLayout() {
               )}
             </div>
 
-            {/* Separator */}
+            { }
             <div className="h-5 w-px bg-border/80" />
 
-            {/* Profile Dropdown */}
+            { }
             <div className="relative" ref={profileRef}>
               <button
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-2 hover:bg-muted/50 p-1.5 rounded-lg transition-colors cursor-pointer"
               >
-                <div className="h-8 w-8 rounded-full bg-secondary text-primary-foreground border border-secondary/20 flex items-center justify-center font-bold text-xs">
-                  YS
-                </div>
+                {me.data ? (
+                  <img
+                    src={avatarUrl(me.data.id)}
+                    alt=""
+                    className="h-8 w-8 rounded-full border border-secondary/20 bg-secondary object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                  />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-secondary/20 bg-secondary text-xs font-bold text-primary-foreground">
+                    {myInitials}
+                  </div>
+                )}
                 <div className="text-left hidden lg:block pr-1 leading-tight">
-                  <p className="text-xs font-semibold text-foreground">Yusuf Siyam</p>
-                  <p className="text-[10px] text-muted-foreground font-medium">Administrator</p>
+                  <p className="text-xs font-semibold text-foreground">{myName}</p>
+                  <p className="text-[10px] font-medium capitalize text-muted-foreground">{myRole}</p>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden lg:block" />
               </button>
 
-              {/* Profile Dropdown Options */}
+              { }
               {isProfileOpen && (
                 <div className="absolute right-0 mt-2.5 w-48 bg-card border border-border/80 rounded-xl shadow-lg py-2 z-50 animate-in fade-in slide-in-from-top-3 duration-200">
                   <div className="px-4 py-2 border-b border-border/60 lg:hidden">
-                    <p className="text-xs font-semibold text-foreground">Yusuf Siyam</p>
-                    <p className="text-[10px] text-muted-foreground font-medium">Administrator</p>
+                    <p className="text-xs font-semibold text-foreground">{myName}</p>
+                    <p className="text-[10px] font-medium capitalize text-muted-foreground">{myRole}</p>
                   </div>
                   <NavLink
                     to="/profile"
@@ -439,19 +479,19 @@ export default function DashboardLayout() {
           </div>
         </header>
 
-        {/* Content Outlet Container */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-accent/20">
+        { }
+        <main className="dashboard-surface flex-1 overflow-y-auto p-4 md:p-6 bg-accent/20">
           <div className="max-w-[1600px] mx-auto space-y-6">
             <Outlet />
           </div>
         </main>
       </div>
 
-      {/* Logout confirmation Dialog */}
+      { }
       <ConfirmDialog
         isOpen={isLogoutDialogOpen}
         title="Confirm Logout"
-        description="Are you sure you want to log out of the AgroMED Connect Admin panel? You will need to enter your credentials to log back in."
+        description="Are you sure you want to log out of the AgroMedConnect Admin panel? You will need to enter your credentials to log back in."
         confirmText="Logout"
         variant="danger"
         onConfirm={handleLogoutConfirm}

@@ -1,164 +1,132 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Activity, Building2, TrendingDown, TrendingUp } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import DataTable from '@/components/shared/DataTable';
 import type { Column } from '@/components/shared/DataTable';
-import PercentageBadge from '@/components/shared/PercentageBadge';
 import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
-import { Building2, TrendingUp, TrendingDown, Activity } from 'lucide-react';
-
-interface CompanyPerformanceItem {
-  rank: number;
-  id: string;
-  name: string;
-  totalSales: number;
-  commissionRate: number;
-  platformEarnings: number;
-  growthRate: number;
-  contribution: number;
-}
+import { useApi } from '@/lib/useApi';
+import { formatMinor, getCompanyPerformance } from '@/lib/superadmin-api';
+import type { CompanyPerformance as CompanyPerformanceRow } from '@/lib/superadmin-api';
+import { cn } from '@/lib/utils';
 
 export default function CompanyPerformance() {
-  // Mock performance data mapping v2 mediator metrics
-  const mockPerformance: CompanyPerformanceItem[] = [
-    { rank: 1, id: 'COMP-003', name: 'Bayer CropScience BD', totalSales: 620000, commissionRate: 10.0, platformEarnings: 62000, growthRate: 18.2, contribution: 36.4 },
-    { rank: 2, id: 'COMP-001', name: 'Greenfield Agro Ltd.', totalSales: 420000, commissionRate: 8.0, platformEarnings: 33600, growthRate: 12.4, contribution: 24.6 },
-    { rank: 3, id: 'COMP-002', name: 'Acme Agritech Solutions', totalSales: 260000, commissionRate: 10.0, platformEarnings: 26000, growthRate: 8.5, contribution: 15.2 },
-    { rank: 4, id: 'COMP-004', name: 'Sufala Fertilizer Co.', totalSales: 110000, commissionRate: 10.0, platformEarnings: 11000, growthRate: -4.2, contribution: 6.4 },
-    { rank: 5, id: 'COMP-006', name: 'Organic Roots BD', totalSales: 90000, commissionRate: 10.0, platformEarnings: 9000, growthRate: 14.6, contribution: 5.3 },
-    { rank: 6, id: 'COMP-005', name: 'Teesta Seed Distributors', totalSales: 47500, commissionRate: 10.0, platformEarnings: 4750, growthRate: 2.1, contribution: 2.8 }
-  ];
-
   const [search, setSearch] = useState('');
+  const [months, setMonths] = useState(3);
 
-  const filteredData = mockPerformance.filter((item) =>
-    item.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const performance = useApi((token) => getCompanyPerformance(token, months, 50), [months]);
+  const all = useMemo(() => performance.data ?? [], [performance.data]);
 
-  const topPerformer = mockPerformance[0];
-  const lowestPerformer = mockPerformance[mockPerformance.length - 1];
+  const rows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return needle ? all.filter((c) => c.legalName.toLowerCase().includes(needle)) : all;
+  }, [all, search]);
 
-  const columns: Column<CompanyPerformanceItem>[] = [
+  const totalGmv = useMemo(() => all.reduce((t, c) => t + c.gmvMinor, 0), [all]);
+  const totalCommission = useMemo(() => all.reduce((t, c) => t + c.commissionMinor, 0), [all]);
+  const growing = useMemo(() => all.filter((c) => c.previousGmvMinor > 0 && c.gmvMinor > c.previousGmvMinor).length, [all]);
+  const shrinking = useMemo(() => all.filter((c) => c.previousGmvMinor > 0 && c.gmvMinor < c.previousGmvMinor).length, [all]);
+
+  const columns: Column<CompanyPerformanceRow>[] = [
     {
       key: 'rank',
-      label: 'Rank',
+      label: '#',
       align: 'center',
-      render: (row) => <span className="font-mono font-bold text-muted-foreground">#{row.rank}</span>
+      render: (_row, index) => <span className="font-bold text-muted-foreground">{index + 1}</span>
     },
     {
-      key: 'name',
-      label: 'Company Name',
+      key: 'legalName',
+      label: 'Company',
       render: (row) => (
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-primary shrink-0" />
-          <span className="font-bold text-foreground">{row.name}</span>
+        <div className="flex flex-col">
+          <span className="font-semibold text-foreground">{row.legalName}</span>
+          <span className="text-xs text-muted-foreground">
+            {row.kind === 'manufacturer' ? 'Manufacturer' : 'Importer / supplier'}
+            {row.sellerTier ? ` · ${row.sellerTier}` : ''}
+          </span>
         </div>
       )
     },
+    { key: 'orderCount', label: 'Orders', align: 'center' },
+    { key: 'gmvMinor', label: 'Total sales', align: 'right', render: (row) => <span className="font-semibold text-foreground">{formatMinor(row.gmvMinor)}</span> },
     {
-      key: 'totalSales',
-      label: 'Total Sales (GMV)',
+      key: 'rate',
+      label: 'Effective rate',
       align: 'right',
-      render: (row) => `$${row.totalSales.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+      render: (row) => (
+        <span className="text-muted-foreground">
+          {row.gmvMinor === 0 ? '—' : `${((row.commissionMinor / row.gmvMinor) * 100).toFixed(2)}%`}
+        </span>
+      )
     },
+    { key: 'commissionMinor', label: 'Platform earnings', align: 'right', render: (row) => formatMinor(row.commissionMinor) },
     {
-      key: 'commissionRate',
-      label: 'Commission Rate',
-      align: 'center',
-      render: (row) => <PercentageBadge value={row.commissionRate} type="commission" />
-    },
-    {
-      key: 'platformEarnings',
-      label: 'Platform Earnings',
+      key: 'growth',
+      label: 'Growth',
       align: 'right',
-      render: (row) => `$${row.platformEarnings.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
-    },
-    {
-      key: 'growthRate',
-      label: 'Growth Rate',
-      align: 'center',
-      render: (row) => <PercentageBadge value={row.growthRate} type="growth" />
+      render: (row) => {
+        if (row.previousGmvMinor === 0) {
+          return <span className="text-xs font-semibold text-success">{row.gmvMinor > 0 ? 'New' : '—'}</span>;
+        }
+        const pct = ((row.gmvMinor - row.previousGmvMinor) / row.previousGmvMinor) * 100;
+        const up = pct >= 0;
+        return (
+          <span className={cn('inline-flex items-center gap-1 text-xs font-semibold', up ? 'text-success' : 'text-destructive')}>
+            {up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+            {Math.abs(pct).toFixed(1)}%
+          </span>
+        );
+      }
     },
     {
       key: 'contribution',
-      label: 'Share Share',
-      align: 'center',
-      render: (row) => <PercentageBadge value={row.contribution} type="contribution" />
+      label: 'Contribution',
+      align: 'right',
+      render: (row) => <span className="text-muted-foreground">{totalGmv === 0 ? '—' : `${((row.gmvMinor / totalGmv) * 100).toFixed(1)}%`}</span>
     }
   ];
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <PageHeader
         title="Company Performance"
         breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Companies', href: '/companies' }, { label: 'Performance' }]}
         action={
-          <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg shadow-sm">
-            <Activity className="h-3.5 w-3.5" />
-            Rankings Auto-compiled
-          </div>
+          <select
+            value={months}
+            onChange={(e) => setMonths(Number(e.target.value))}
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground"
+          >
+            <option value={3}>Last 3 months</option>
+            <option value={6}>Last 6 months</option>
+            <option value={12}>Last 12 months</option>
+          </select>
         }
       />
 
-      {/* Top / Lowest performing summary widgets */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="relative">
-          <div className="absolute top-3 right-3 p-1.5 bg-info/10 text-info border border-info/20 rounded-md z-15">
-            <TrendingUp className="h-4 w-4" />
-          </div>
-          <FinancialSummaryCard
-            label="Top Performance Contributor"
-            amount={topPerformer.totalSales}
-            subtext={`${topPerformer.name} (${topPerformer.contribution}% contribution split)`}
-            variant="success"
-          />
-        </div>
-        <div className="relative">
-          <div className="absolute top-3 right-3 p-1.5 bg-destructive/10 text-destructive border border-destructive/20 rounded-md z-15">
-            <TrendingDown className="h-4 w-4" />
-          </div>
-          <FinancialSummaryCard
-            label="Lowest Performance Contributor"
-            amount={lowestPerformer.totalSales}
-            subtext={`${lowestPerformer.name} (${lowestPerformer.contribution}% contribution split)`}
-            variant="danger"
-          />
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <FinancialSummaryCard label="Combined sales" amount={formatMinor(totalGmv)} variant="info" />
+        <FinancialSummaryCard label="Platform earnings" amount={formatMinor(totalCommission)} variant="success" />
+        <FinancialSummaryCard label="Growing" amount={String(growing)} />
+        <FinancialSummaryCard label="Shrinking" amount={String(shrinking)} variant={shrinking > 0 ? 'warning' : 'default'} />
       </div>
 
-      {/* Simple comparative horizontal bar chart */}
-      <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-        <div>
-          <h3 className="text-sm font-bold text-foreground">Sales Volume (GMV) Comparative Scale</h3>
-          <p className="text-xs text-muted-foreground">Direct billing volume contrast across all active third-party suppliers</p>
-        </div>
-        <div className="space-y-3.5 pt-2">
-          {mockPerformance.map((comp, idx) => (
-            <div key={idx} className="flex items-center gap-4 text-xs font-semibold">
-              <span className="w-40 text-foreground/80 truncate">{comp.name}</span>
-              <div className="flex-1 bg-muted rounded-full h-3 relative">
-                <div
-                  className="bg-primary h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${(comp.totalSales / topPerformer.totalSales) * 100}%` }}
-                />
-              </div>
-              <span className="w-24 text-right text-foreground font-mono font-bold">${comp.totalSales.toLocaleString()}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <DataTable
+        columns={columns}
+        data={rows}
+        isLoading={performance.loading}
+        error={performance.error}
+        onRetry={performance.reload}
+        searchPlaceholder="Search company..."
+        searchValue={search}
+        onSearchChange={setSearch}
+      />
 
-      {/* Ranked Performance DataTable */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-bold text-foreground px-1">Performance Audits Registry</h3>
-        <DataTable
-          columns={columns}
-          data={filteredData}
-          searchPlaceholder="Search performance metrics by company..."
-          searchValue={search}
-          onSearchChange={setSearch}
-        />
-      </div>
+      <p className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+        <Building2 className="h-3.5 w-3.5" />
+        <Activity className="h-3.5 w-3.5" />
+        Growth compares this window with the one immediately before it. A company with no sales in
+        the earlier window shows as new rather than as an infinite percentage.
+      </p>
     </div>
   );
 }

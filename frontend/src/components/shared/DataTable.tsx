@@ -61,7 +61,7 @@ export default function DataTable({
 
   return (
     <div className="space-y-4">
-      {/* Search and Filters controls */}
+      { }
       {(onSearchChange || filterSlot) && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {onSearchChange && (
@@ -84,7 +84,7 @@ export default function DataTable({
         </div>
       )}
 
-      {/* Main Table Card wrapper */}
+      { }
       <div className="bg-card border border-border/80 rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left border-collapse">
@@ -134,7 +134,7 @@ export default function DataTable({
                   </td>
                 </tr>
               ) : isLoading ? (
-                // Table Rows skeleton loader
+
                 Array.from({ length: 5 }).map((_, rIdx) => (
                   <tr key={rIdx} className="border-b border-border/60 last:border-0">
                     {columns.map((col) => (
@@ -174,7 +174,7 @@ export default function DataTable({
         </div>
       </div>
 
-      {/* Pagination Footer */}
+      { }
       {pagination && pagination.totalPages > 1 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-2">
           <div className="text-xs text-muted-foreground font-medium text-center sm:text-left">
@@ -208,7 +208,7 @@ export default function DataTable({
             </button>
             {Array.from({ length: pagination.totalPages }).map((_, idx) => {
               const pageNum = idx + 1;
-              // Simple slide window around current page
+
               if (
                 pageNum === 1 ||
                 pageNum === pagination.totalPages ||

@@ -1,157 +1,111 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Eye, EyeOff, Loader2, Lock } from 'lucide-react';
 import { useToast } from '@/components/shared/Toast';
+import { resetPassword } from '@/lib/superadmin-api';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { success } = useToast();
+  const location = useLocation();
+  const { success, error } = useToast();
 
+  const carried = (location.state as { phone?: string } | null)?.phone ?? '';
+
+  const [phone, setPhone] = useState(carried);
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const [passwordError, setPasswordError] = useState('');
-  const [confirmError, setConfirmError] = useState('');
-
-  const validatePassword = (val: string) => {
-    if (!val) {
-      return 'Password is required';
-    } else if (val.length < 6) {
-      return 'Password must be at least 6 characters long';
-    }
-    return '';
-  };
-
-  const validateConfirmPassword = (val: string, pass: string) => {
-    if (!val) {
-      return 'Please confirm your new password';
-    } else if (val !== pass) {
-      return 'Passwords do not match';
-    }
-    return '';
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const pErr = validatePassword(password);
-    const cErr = validateConfirmPassword(confirmPassword, password);
+    const next: Record<string, string> = {};
+    if (!phone.trim()) next.phone = 'The mobile number the code was sent to is required';
+    if (!/^\d{4,10}$/.test(code.trim())) next.code = 'Enter the code from the SMS';
+    if (password.length < 8) next.password = 'Password must be at least 8 characters long';
+    if (password !== confirmPassword) next.confirm = 'The two passwords do not match';
+    setErrors(next);
+    if (Object.keys(next).length) return;
 
-    setPasswordError(pErr);
-    setConfirmError(cErr);
-
-    if (pErr || cErr) {
-      return;
-    }
-
+    const normalised = phone.replace(/[\s-]/g, '');
     setIsLoading(true);
-
-    // Simulate Reset API
-    setTimeout(() => {
-      setIsLoading(false);
-      success('Password reset successfully');
+    try {
+      await resetPassword(normalised.startsWith('+') ? normalised : `+${normalised}`, code.trim(), password);
+      success('Password changed. Sign in with the new one.');
       navigate('/auth/login');
-    }, 1200);
+    } catch (err) {
+      error(err instanceof Error ? err.message : 'That reset code is not valid.');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const field = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20';
+  const label = 'text-[11px] font-bold text-foreground/80';
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col space-y-1 text-center">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Reset Password</h1>
-        <p className="text-sm text-muted-foreground">Please choose a secure new password for your account</p>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Set a new password</h1>
+        <p className="text-sm text-muted-foreground">Enter the code we sent by SMS and choose a new password.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* New Password */}
-        <div className="space-y-1.5">
-          <label htmlFor="password" className="text-xs font-semibold text-foreground/80">
-            New Password
-          </label>
+        <div className="space-y-1">
+          <label className={label} htmlFor="reset-phone">Mobile number</label>
+          <input id="reset-phone" type="tel" autoComplete="tel" value={phone}
+            onChange={(e) => setPhone(e.target.value)} disabled={isLoading}
+            placeholder="+8801711000001" className={field} />
+          {errors.phone && <p className="text-xs text-destructive">{errors.phone}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <label className={label} htmlFor="reset-code">Reset code</label>
+          <input id="reset-code" inputMode="numeric" autoComplete="one-time-code" value={code}
+            onChange={(e) => setCode(e.target.value)} disabled={isLoading}
+            placeholder="123456" className={field} />
+          {errors.code && <p className="text-xs text-destructive">{errors.code}</p>}
+        </div>
+
+        <div className="space-y-1">
+          <label className={label} htmlFor="reset-password">New password</label>
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground/80" />
-            <input
-              id="password"
-              type={showPassword ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (passwordError) setPasswordError('');
-              }}
-              placeholder="••••••••"
-              disabled={isLoading}
-              className={`w-full pl-10 pr-10 py-2.5 text-sm border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow ${
-                passwordError
-                  ? 'border-destructive focus:ring-destructive/20 focus:border-destructive'
-                  : 'border-border focus:ring-primary/20 focus:border-primary'
-              }`}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              disabled={isLoading}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none"
-            >
-              {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
+            <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input id="reset-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password"
+              value={password} onChange={(e) => setPassword(e.target.value)} disabled={isLoading}
+              className={`${field} pl-9 pr-9`} />
+            <button type="button" onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground">
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-          {passwordError && <p className="text-xs font-medium text-destructive">{passwordError}</p>}
+          {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
         </div>
 
-        {/* Confirm Password */}
-        <div className="space-y-1.5">
-          <label htmlFor="confirmPassword" className="text-xs font-semibold text-foreground/80">
-            Confirm Password
-          </label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-muted-foreground/80" />
-            <input
-              id="confirmPassword"
-              type={showPassword ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={(e) => {
-                setConfirmPassword(e.target.value);
-                if (confirmError) setConfirmError('');
-              }}
-              placeholder="••••••••"
-              disabled={isLoading}
-              className={`w-full pl-10 pr-4 py-2.5 text-sm border bg-background text-foreground rounded-lg focus:outline-none focus:ring-2 transition-shadow ${
-                confirmError
-                  ? 'border-destructive focus:ring-destructive/20 focus:border-destructive'
-                  : 'border-border focus:ring-primary/20 focus:border-primary'
-              }`}
-            />
-          </div>
-          {confirmError && <p className="text-xs font-medium text-destructive">{confirmError}</p>}
+        <div className="space-y-1">
+          <label className={label} htmlFor="reset-confirm">Confirm new password</label>
+          <input id="reset-confirm" type={showPassword ? 'text' : 'password'} autoComplete="new-password"
+            value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
+            disabled={isLoading} className={field} />
+          {errors.confirm && <p className="text-xs text-destructive">{errors.confirm}</p>}
         </div>
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full flex items-center justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-primary-foreground bg-primary hover:bg-primary/95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-60 transition-colors cursor-pointer"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="animate-spin h-4 w-4 mr-2" />
-              Resetting password...
-            </>
-          ) : (
-            'Reset Password'
-          )}
+        <button type="submit" disabled={isLoading}
+          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/95 disabled:opacity-60">
+          {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+          {isLoading ? 'Saving…' : 'Set new password'}
         </button>
-
-        {/* Back link */}
-        <div className="text-center pt-2">
-          <Link
-            to="/auth/login"
-            className="text-xs font-semibold text-muted-foreground hover:text-foreground hover:underline transition-colors"
-          >
-            Cancel and return to login
-          </Link>
-        </div>
       </form>
+
+      <Link to="/auth/login"
+        className="flex items-center justify-center gap-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Back to sign in
+      </Link>
     </div>
   );
 }

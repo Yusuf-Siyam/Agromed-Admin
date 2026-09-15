@@ -1,12 +1,16 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import AuthLayout from "../layouts/AuthLayout";
-import DashboardLayout from "../layouts/DashboardLayout";
+import ProtectedDashboardLayout from "../layouts/ProtectedDashboardLayout";
 
-// Import feature routes
 import { AuthRoutes } from "../features/auth/routes";
 import { CompaniesRoutes } from "../features/companies/routes";
 import { DashboardRoutes } from "../features/dashboard/routes";
-import { FarmersRoutes } from "../features/farmers/routes";
+
+import { BuyersRoutes } from "../features/buyers/routes";
+import { OrdersRoutes } from "../features/orders/routes";
+import { PaymentsRoutes } from "../features/payments/routes";
+import { ProductsRoutes } from "../features/products/routes";
+import { CategoriesRoutes } from "../features/categories/routes";
 import { ServiceProvidersRoutes } from "../features/service-providers/routes";
 import { SalesRoutes } from "../features/sales/routes";
 import { RevenueRoutes } from "../features/revenue/routes";
@@ -35,12 +39,19 @@ export const router = createBrowserRouter(
     },
     {
       path: "/",
-      element: <DashboardLayout />,
+      element: <ProtectedDashboardLayout />,
       children: [
         { index: true, element: <Navigate to="/dashboard" replace /> },
         ...DashboardRoutes,
         ...CompaniesRoutes,
-        ...FarmersRoutes,
+        ...BuyersRoutes,
+
+        { path: "/farmers", element: <Navigate to="/buyers" replace /> },
+        { path: "/farmers/:id", element: <Navigate to="/buyers" replace /> },
+        ...OrdersRoutes,
+        ...PaymentsRoutes,
+        ...ProductsRoutes,
+        ...CategoriesRoutes,
         ...ServiceProvidersRoutes,
         ...SalesRoutes,
         ...RevenueRoutes,

@@ -1,11 +1,14 @@
 import { RouterProvider } from 'react-router-dom';
 import { router } from './routes';
 import { ToastProvider } from './components/shared/Toast';
+import { SuperAdminSessionProvider } from './features/auth/SuperAdminSession';
 
 function App() {
   return (
     <ToastProvider>
-      <RouterProvider router={router} />
+      <SuperAdminSessionProvider>
+        <RouterProvider router={router} />
+      </SuperAdminSessionProvider>
     </ToastProvider>
   );
 }

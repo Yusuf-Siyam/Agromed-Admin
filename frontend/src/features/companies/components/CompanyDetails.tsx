@@ -1,42 +1,58 @@
-import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowLeft,
-  Building2,
-  Globe,
-  Mail,
-  Phone,
-  MapPin,
-  Calendar,
-  Shield,
-  FileText,
-  TrendingUp,
-  CreditCard,
-  Percent,
-  CheckCircle2,
-  Ban
+  ArrowLeft, Ban, Building2, Calendar, CheckCircle2, Mail, MapPin,
+  Percent, Phone, TrendingUp
 } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import FinancialSummaryCard from '@/components/shared/FinancialSummaryCard';
-import PercentageBadge from '@/components/shared/PercentageBadge';
 import StatusBadge from '@/components/shared/StatusBadge';
+import RoleTags from '@/components/shared/RoleTags';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
-import { mockCompanies } from '@/mock-data/companies';
-import { EmptyState } from '@/components/shared/States';
+import { EmptyState, ErrorState, LoadingState } from '@/components/shared/States';
+import DocumentList from '@/components/shared/DocumentList';
 import { useToast } from '@/components/shared/Toast';
+import { useApi, useApiAction } from '@/lib/useApi';
+import {
+  formatDate, formatMinor, listListings, listOrganisationDocuments, listOrganisations,
+  listOrders, listPayouts, setOrganisationStatus
+} from '@/lib/superadmin-api';
 
 export default function CompanyDetails() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
+  const { run, busy } = useApiAction();
 
-  // Find company
-  const initialCompany = mockCompanies.find((c) => c.id === id);
-  const [company, setCompany] = useState(initialCompany);
+  const [activeAction, setActiveAction] = useState<'suspend' | 'activate' | null>(null);
 
-  // Verification Dialog triggers
-  const [activeAction, setActiveAction] = useState<'verify' | 'suspend' | 'activate' | null>(null);
-  const [viewingDoc, setViewingDoc] = useState<string | null>(null);
+  const organisations = useApi((token) => listOrganisations(token, { kind: 'seller', limit: 100 }), []);
+  const listings = useApi((token) => listListings(token, { organisationId: id, limit: 100 }), [id]);
+  const orders = useApi((token) => listOrders(token, { organisationId: id, limit: 100 }), [id]);
+  const payouts = useApi((token) => listPayouts(token, { limit: 100 }), []);
+  const documents = useApi((token) => listOrganisationDocuments(token, id!), [id]);
+
+  const company = organisations.data?.items.find((c) => c.id === id);
+
+  const money = useMemo(() => {
+    const rows = (orders.data?.items ?? []).filter((o) => o.sellerOrganisationId === id);
+    const traded = rows.filter((o) => !['cancelled', 'pending_payment'].includes(o.status));
+    const gross = traded.reduce((t, o) => t + o.grandTotalMinor, 0);
+    const commission = traded.reduce((t, o) => t + o.commissionMinor, 0);
+    const subsidy = traded.reduce((t, o) => t + o.discountTotalMinor, 0);
+    const net = traded.reduce((t, o) => t + o.sellerNetMinor, 0);
+
+    const mine = (payouts.data?.items ?? []).filter((p) => p.organisationId === id);
+    const paid = mine.filter((p) => p.status === 'paid').reduce((t, p) => t + p.amountMinor, 0);
+    const inFlight = mine
+      .filter((p) => ['pending', 'approved', 'processing'].includes(p.status))
+      .reduce((t, p) => t + p.amountMinor, 0);
+
+    return { gross, commission, subsidy, net, paid, inFlight, orderCount: traded.length };
+  }, [orders.data, payouts.data, id]);
+
+  if (organisations.loading) return <LoadingState message="Loading company…" />;
+  if (organisations.error) return <ErrorState message={organisations.error} onRetry={organisations.reload} />;
 
   if (!company) {
     return (
@@ -44,12 +60,9 @@ export default function CompanyDetails() {
         <PageHeader title="Company Not Found" breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Companies', href: '/companies' }, { label: 'Error' }]} />
         <EmptyState
           title="Company profile not found"
-          description="The company ID you requested does not exist or may have been deleted."
+          description="That company does not exist, or it has been closed."
           action={
-            <Link
-              to="/companies"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/95 text-primary-foreground text-sm font-semibold rounded-lg"
-            >
+            <Link to="/companies" className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
               <ArrowLeft className="h-4 w-4" />
               Back to Companies
             </Link>
@@ -59,276 +72,194 @@ export default function CompanyDetails() {
     );
   }
 
-  // Calculate detailed v2 financial fields based on GMV sales
-  // Let's assume a default 10% commission override model, with some specific discounts
-  const grossSales = company.salesCount * 50; // mock average ticket price
-  const commissionRate = company.id === 'COMP-001' ? 8.0 : 10.0; // special commission override
-  const commissionEarned = (grossSales * commissionRate) / 100;
-  const platformFee = grossSales * 0.02; // gateway / payment fees (2%)
-  const discountFunded = grossSales * 0.015; // discounts absorbed (1.5%)
-  const netCompanySale = grossSales - commissionEarned - platformFee - discountFunded;
-  
-  const paidAmount = netCompanySale * 0.8; // 80% settled
-  const pendingAmount = netCompanySale - paidAmount; // 20% due
+  const effectiveRate = money.gross === 0 ? null : (money.commission / money.gross) * 100;
 
-  const handleExecuteVerification = () => {
-    if (!activeAction) return;
-
-    let nextStatus: 'active' | 'suspended' = 'active';
-    let msg = '';
-
-    if (activeAction === 'verify' || activeAction === 'activate') {
-      nextStatus = 'active';
-      msg = `Company "${company.name}" has been approved and verified successfully.`;
-    } else if (activeAction === 'suspend') {
-      nextStatus = 'suspended';
-      msg = `Company "${company.name}" suspension active.`;
-    }
-
-    setCompany((prev) => prev ? { ...prev, status: nextStatus } : prev);
-    success(msg);
+  async function execute() {
+    if (!activeAction || !company) return;
+    const next = activeAction === 'suspend' ? 'suspended' : 'active';
     setActiveAction(null);
-  };
+
+    const ok = await run((token) => setOrganisationStatus(token, company.id, next));
+    if (ok) {
+      success(`${company.legalName} is now ${next}.`);
+      organisations.reload();
+    } else {
+      toastError(`${company.legalName} could not be updated.`);
+    }
+  }
 
   return (
     <div className="space-y-6">
-      {/* Back navigation & Page Header */}
       <div className="space-y-2">
         <button
           onClick={() => navigate('/companies')}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+          className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Agro Companies list
+          Back to Companies
         </button>
         <PageHeader
-          title={company.name}
-          breadcrumbs={[
-            { label: 'Home', href: '/' },
-            { label: 'Companies', href: '/companies' },
-            { label: company.name }
-          ]}
+          title={company.legalName}
+          breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Companies', href: '/companies' }, { label: company.legalName }]}
           action={
-            <div className="flex gap-2">
-              {company.status === 'pending' && (
-                <button
-                  onClick={() => setActiveAction('verify')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-info hover:bg-info/95 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  Verify Company
-                </button>
-              )}
-              {company.status === 'active' && (
+            <div className="flex items-center gap-2">
+              <StatusBadge status={company.status} />
+              {company.status === 'active' ? (
                 <button
                   onClick={() => setActiveAction('suspend')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive hover:bg-destructive/95 text-destructive-foreground font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-2 text-xs font-semibold text-destructive disabled:opacity-60"
                 >
-                  <Ban className="h-4 w-4" />
-                  Suspend Account
+                  <Ban className="h-3.5 w-3.5" />Suspend
                 </button>
-              )}
-              {company.status === 'suspended' && (
+              ) : company.status === 'suspended' ? (
                 <button
                   onClick={() => setActiveAction('activate')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-info hover:bg-info/95 text-white font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+                  disabled={busy}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
                 >
-                  <CheckCircle2 className="h-4 w-4" />
-                  Reactivate Account
+                  <CheckCircle2 className="h-3.5 w-3.5" />Reinstate
                 </button>
-              )}
+              ) : null}
             </div>
           }
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Section 1: Business Info & Contact Details */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-primary/10 text-primary rounded-xl border border-primary/20">
-                <Building2 className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-foreground leading-snug">{company.name}</h3>
-                <span className="text-xs text-muted-foreground font-mono">{company.id}</span>
-              </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
+            <Building2 className="h-4.5 w-4.5 text-primary" />Profile
+          </h3>
+          <dl className="space-y-2.5 text-sm">
+            <div className="flex items-start gap-2"><Mail className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" /><dd className="text-foreground">{company.contactEmail ?? '—'}</dd></div>
+            <div className="flex items-start gap-2"><Phone className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" /><dd className="text-foreground">{company.contactPhone ?? '—'}</dd></div>
+            <div className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" /><dd className="text-foreground">{company.addressLine ?? '—'}</dd></div>
+            <div className="flex items-start gap-2"><Calendar className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" /><dd className="text-foreground">Joined {formatDate(company.createdAt)}</dd></div>
+            <div className="border-t border-border pt-2.5" />
+            <div className="flex justify-between"><dt className="text-muted-foreground">Registered name</dt><dd className="text-right font-semibold text-foreground">{company.legalName}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Trade licence</dt><dd className="font-mono text-xs text-foreground">{company.tradeLicenceNo ?? 'not recorded'}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Handle</dt><dd className="font-mono text-xs text-foreground">{company.slug}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Organisation type</dt><dd className="text-foreground">{company.kind === 'manufacturer' ? 'Manufacturer' : 'Importer / supplier'}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Currency</dt><dd className="text-foreground">{company.currency}</dd></div>
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Verification</dt>
+              <dd className="flex items-center gap-1.5">
+                <StatusBadge status={company.verificationStatus} />
+                {company.verifiedAt && <span className="text-xs text-muted-foreground">{formatDate(company.verifiedAt)}</span>}
+              </dd>
             </div>
-
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {company.description}
-            </p>
-
-            <div className="border-t border-border/60 my-2" />
-
-            <div className="space-y-3 text-xs font-semibold">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Verification status:</span>
-                <StatusBadge status={company.status} />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">License ID:</span>
-                <span className="font-mono">{company.licenseId}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Joined Date:</span>
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                  {company.joinedDate}
-                </span>
-              </div>
+            <div className="flex items-start justify-between gap-2">
+              <dt className="text-muted-foreground">Operates as</dt>
+              <dd className="flex flex-wrap justify-end gap-1">
+                <RoleTags organisation={company} />
+              </dd>
             </div>
-          </div>
-
-          {/* Contact Details Card */}
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-3.5 text-xs font-semibold">
-            <h4 className="text-[10px] font-bold text-foreground tracking-wider uppercase">Contact Information</h4>
-            <div className="flex items-start gap-2.5">
-              <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span className="break-all">{company.email}</span>
-            </div>
-            <div className="flex items-start gap-2.5">
-              <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span>{company.phone}</span>
-            </div>
-            <div className="flex items-start gap-2.5">
-              <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
-              <a href={company.website} target="_blank" rel="noopener noreferrer" className="text-info hover:underline break-all">
-                {company.website}
-              </a>
-            </div>
-            <div className="flex items-start gap-2.5">
-              <MapPin className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-              <span className="leading-relaxed text-muted-foreground">{company.address}</span>
-            </div>
-          </div>
+          </dl>
         </div>
 
-        {/* Financial Auditing Sections */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Section 2: Sales Performance Details */}
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <h4 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
-              <TrendingUp className="h-4.5 w-4.5 text-primary" />
-              Sales & Earnings Performance
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FinancialSummaryCard label="Total Sales (GMV)" amount={grossSales} variant="info" />
-              <FinancialSummaryCard label="Platform Transaction Fee (2%)" amount={platformFee} variant="warning" />
-              <FinancialSummaryCard label="Discounts Absorbed" amount={discountFunded} variant="danger" />
-              <FinancialSummaryCard label="Net Company Sale" amount={netCompanySale} variant="success" />
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
+            <TrendingUp className="h-4.5 w-4.5 text-primary" />Trading
+          </h3>
+          <dl className="space-y-2.5 text-sm">
+            <div className="flex justify-between"><dt className="text-muted-foreground">Listings</dt><dd className="font-semibold text-foreground">{company.listingCount}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Orders</dt><dd className="font-semibold text-foreground">{company.orderCount}</dd></div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Team members</dt><dd className="font-semibold text-foreground">{company.memberCount}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Rating</dt>
+              <dd className="font-semibold text-foreground">
+                {company.averageRating == null ? 'No reviews' : `★ ${Number(company.averageRating).toFixed(1)} (${company.reviewCount})`}
+              </dd>
             </div>
-          </div>
-
-          {/* Section 3 & 4: Commission & Settlements Billing */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            
-            {/* Commission Settings overview */}
-            <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-              <h4 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
-                <Percent className="h-4.5 w-4.5 text-primary" />
-                Commission Configuration
-              </h4>
-              <div className="space-y-3.5 text-xs font-semibold">
-                <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-                  <span className="text-muted-foreground">Commission Model:</span>
-                  <span className={company.id === 'COMP-001' ? 'text-secondary-foreground' : 'text-primary'}>
-                    {company.id === 'COMP-001' ? 'Special Override' : 'Standard Rate'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-                  <span className="text-muted-foreground">Commission Rate:</span>
-                  <PercentageBadge value={commissionRate} type="commission" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Total Commission Earned:</span>
-                  <span className="font-bold text-foreground">${commissionEarned.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Billing settlement records */}
-            <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-              <h4 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
-                <CreditCard className="h-4.5 w-4.5 text-primary" />
-                Billing Settlements
-              </h4>
-              <div className="space-y-3.5 text-xs font-semibold">
-                <div className="flex items-center justify-between border-b border-border/40 pb-2.5">
-                  <span className="text-muted-foreground">Settled / Paid to Date:</span>
-                  <span className="text-info">${paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Pending Settlement Owed:</span>
-                  <span className="text-secondary-foreground font-bold">${pendingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Section 5: Verification Documents Viewer (View-Only) */}
-          <div className="bg-card border border-border/80 rounded-xl p-5 shadow-sm space-y-4">
-            <h4 className="text-xs font-bold text-foreground tracking-wider uppercase flex items-center gap-2">
-              <Shield className="h-4.5 w-4.5 text-primary" />
-              Verified Trade Licensing Documents
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { name: 'Trade License PDF', ref: 'LIC-2025-0918' },
-                { name: 'TIN Tax Registration Certificate', ref: 'TIN-40182-901' },
-                { name: 'VAT Registration Certificate', ref: 'VAT-9018281' }
-              ].map((doc, idx) => (
-                <div
-                  key={idx}
-                  onClick={() => setViewingDoc(doc.name)}
-                  className="border border-border/80 rounded-lg p-3 hover:bg-muted hover:border-primary/20 transition-all cursor-pointer flex flex-col justify-between h-24"
-                >
-                  <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
-                  <div className="leading-tight">
-                    <span className="text-[10px] font-bold text-foreground block truncate">{doc.name}</span>
-                    <span className="text-[9px] text-muted-foreground font-mono">{doc.ref}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Document display screen modal */}
-            {viewingDoc && (
-              <div className="border border-border/80 bg-accent/10 rounded-xl p-4 mt-4 space-y-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                  <span className="text-xs font-bold text-foreground">Secure Vault Preview: {viewingDoc}</span>
-                  <button
-                    onClick={() => setViewingDoc(null)}
-                    className="text-xs font-bold text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    Close Preview
-                  </button>
-                </div>
-                <div className="h-32 flex flex-col items-center justify-center text-center p-3 text-xs">
-                  <Shield className="h-8 w-8 text-primary/80 mb-1" />
-                  <span className="font-bold">Cryptographically Verified</span>
-                  <span className="text-[10px] text-muted-foreground">Original license ledger entry confirmed by the platform governor.</span>
-                </div>
-              </div>
-            )}
-          </div>
-
+            <div className="flex justify-between"><dt className="text-muted-foreground">Tier</dt><dd className="font-semibold capitalize text-foreground">{company.sellerTier ?? 'standard'}</dd></div>
+          </dl>
         </div>
 
+        <div className="space-y-4 rounded-xl border border-border/80 bg-card p-5 shadow-sm">
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
+            <Percent className="h-4.5 w-4.5 text-primary" />Commission
+          </h3>
+          <dl className="space-y-2.5 text-sm">
+            <div className="flex justify-between"><dt className="text-muted-foreground">Charged</dt><dd className="font-semibold text-foreground">{formatMinor(money.commission, company.currency)}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-muted-foreground">Effective rate</dt>
+              <dd className="font-semibold text-foreground">{effectiveRate == null ? '—' : `${effectiveRate.toFixed(1)}%`}</dd>
+            </div>
+            <div className="flex justify-between"><dt className="text-muted-foreground">Discount given</dt><dd className="font-semibold text-foreground">{formatMinor(money.subsidy, company.currency)}</dd></div>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            The effective rate is what this company actually paid across its own orders, not the
+            headline rule: every order froze the rule version that priced it.
+          </p>
+        </div>
       </div>
 
-      {/* Verification Actions Dialog Confirmation */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <FinancialSummaryCard label="Gross sales" amount={formatMinor(money.gross, company.currency)} subtext={`${money.orderCount} traded orders`} variant="info" />
+        <FinancialSummaryCard label="Seller net" amount={formatMinor(money.net, company.currency)} subtext="After commission" />
+        <FinancialSummaryCard label="Paid out" amount={formatMinor(money.paid, company.currency)} variant="success" />
+        <FinancialSummaryCard label="Awaiting payout" amount={formatMinor(money.inFlight, company.currency)} variant="warning" />
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
+        <h3 className="border-b border-border px-5 py-4 text-xs font-bold uppercase tracking-wider text-foreground">
+          Submitted documents ({documents.data?.length ?? 0})
+        </h3>
+        <DocumentList
+          documents={documents.data ?? []}
+          loading={documents.loading}
+          emptyMessage="This company has submitted no certificates, licences or identity documents."
+        />
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
+        <h3 className="border-b border-border px-5 py-4 text-xs font-bold uppercase tracking-wider text-foreground">
+          Catalogue ({listings.data?.items.length ?? 0})
+        </h3>
+        {listings.loading ? (
+          <p className="p-8 text-center text-sm text-muted-foreground">Loading listings…</p>
+        ) : (listings.data?.items.length ?? 0) === 0 ? (
+          <p className="p-8 text-center text-sm text-muted-foreground">This company has no listings yet.</p>
+        ) : (
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-muted/50 text-xs text-muted-foreground">
+              <tr>
+                <th className="px-5 py-3 font-semibold">SKU</th>
+                <th className="px-5 py-3 font-semibold">Name</th>
+                <th className="px-5 py-3 font-semibold">Category</th>
+                <th className="px-5 py-3 text-right font-semibold">From</th>
+                <th className="px-5 py-3 text-center font-semibold">Stock</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {(listings.data?.items ?? []).map((l) => (
+                <tr key={l.id}>
+                  <td className="px-5 py-3 text-foreground">{l.sku}</td>
+                  <td className="px-5 py-3 text-foreground">{l.nameEn ?? '—'}</td>
+                  <td className="px-5 py-3 text-muted-foreground">{l.categoryCode}</td>
+                  <td className="px-5 py-3 text-right text-foreground">{l.fromPriceMinor == null ? 'Quote' : formatMinor(l.fromPriceMinor)}</td>
+                  <td className="px-5 py-3 text-center text-foreground">{Number(l.stockOnHand)}</td>
+                  <td className="px-5 py-3"><StatusBadge status={l.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       <ConfirmDialog
-        isOpen={activeAction !== null}
-        title={activeAction === 'verify' ? 'Approve Verification' : activeAction === 'suspend' ? 'Suspend Account' : 'Reactivate Account'}
-        description={`Are you sure you want to execute the "${activeAction}" workflow for ${company.name}? This will update their platform status.`}
+        isOpen={activeAction != null}
+        title={activeAction === 'suspend' ? 'Suspend this company?' : 'Reinstate this company?'}
+        description={
+          activeAction === 'suspend'
+            ? `${company.legalName} keeps its catalogue but cannot trade until it is reinstated.`
+            : `${company.legalName} can sell again immediately.`
+        }
         confirmText="Confirm"
         variant={activeAction === 'suspend' ? 'danger' : 'primary'}
-        onConfirm={handleExecuteVerification}
+        onConfirm={execute}
         onCancel={() => setActiveAction(null)}
       />
     </div>
