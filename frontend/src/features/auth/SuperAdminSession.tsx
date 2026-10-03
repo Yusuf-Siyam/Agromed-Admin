@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { superAdminLogin, superAdminLogout } from '@/lib/superadmin-api';
+import { superAdminLogin, superAdminLogout, superAdminRefresh } from '@/lib/superadmin-api';
+
+// Rotate this long before the access token expires, so no request goes out on a dead token.
+const REFRESH_SKEW_MS = 60_000;
 
 interface SessionContextValue {
   accessToken: string | null;
@@ -15,15 +18,31 @@ export function SuperAdminSessionProvider({ children }: { children: React.ReactN
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
 
+  // Rotate the pair shortly before expiry, as the buyer app's session does. Only a failed rotation
+  // ends the session; the refresh token is single-use, so the new one replaces it.
   useEffect(() => {
-    if (!expiresAt) return;
-    const timeout = window.setTimeout(() => {
-      setAccessToken(null);
-      setRefreshToken(null);
-      setExpiresAt(null);
-    }, Math.max(0, expiresAt - Date.now()));
-    return () => window.clearTimeout(timeout);
-  }, [expiresAt]);
+    if (!expiresAt || !refreshToken) return;
+    let cancelled = false;
+    const timeout = window.setTimeout(async () => {
+      try {
+        const session = await superAdminRefresh(refreshToken);
+        if (cancelled) return;
+        if (!session.user.roles.includes('super_admin')) throw new Error('SuperAdmin access is required.');
+        setAccessToken(session.accessToken);
+        setRefreshToken(session.refreshToken);
+        setExpiresAt(Date.parse(session.expiresAt));
+      } catch {
+        if (cancelled) return;
+        setAccessToken(null);
+        setRefreshToken(null);
+        setExpiresAt(null);
+      }
+    }, Math.max(0, expiresAt - Date.now() - REFRESH_SKEW_MS));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [expiresAt, refreshToken]);
 
   const value = useMemo<SessionContextValue>(() => ({
     accessToken,

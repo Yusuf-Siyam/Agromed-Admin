@@ -102,6 +102,18 @@ export async function superAdminLogin(identifier: string, password: string): Pro
   return response.json() as Promise<SuperAdminAuthResponse>;
 }
 
+// Rotates a console session. Only a refresh token issued by the SuperAdmin login is accepted
+// here; the server keeps its superadmin scope and retires the token presented.
+export async function superAdminRefresh(refreshToken: string): Promise<SuperAdminAuthResponse> {
+  const response = await fetch(`${apiBase}/api/v1/superadmin/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken })
+  });
+  if (!response.ok) throw new ApiError(response.status, 'refresh_failed', 'Your SuperAdmin session has ended.');
+  return response.json() as Promise<SuperAdminAuthResponse>;
+}
+
 export async function superAdminLogout(accessToken: string, refreshToken: string): Promise<void> {
   await fetch(`${apiBase}/api/v1/superadmin/auth/logout`, {
     method: 'POST',
